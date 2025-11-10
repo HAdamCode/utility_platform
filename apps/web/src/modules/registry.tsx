@@ -1,3 +1,6 @@
+import type { ReactNode } from "react";
+import { ExpensesGlyphIcon } from "../components/icons/UtilityIcons";
+
 export interface ModuleDefinition {
   id: string;
   name: string;
@@ -5,6 +8,7 @@ export interface ModuleDefinition {
   path: string;
   tags: string[];
   maturity: "alpha" | "beta" | "stable";
+  icon?: ReactNode;
 }
 
 export const modules: ModuleDefinition[] = [
@@ -15,6 +19,7 @@ export const modules: ModuleDefinition[] = [
       "Track shared trip expenses, digitize receipts, and keep running balances for everyone in your traveling party.",
     path: "/group-expenses",
     tags: ["travel", "finance", "receipts"],
-    maturity: "beta"
+    maturity: "beta",
+    icon: <ExpensesGlyphIcon />
   }
 ];

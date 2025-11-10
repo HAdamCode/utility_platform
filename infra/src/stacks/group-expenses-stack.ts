@@ -133,8 +133,15 @@ export class GroupExpensesStack extends Stack {
       preventUserExistenceErrors: true
     });
 
+    const hostedFrontendDomain =
+      process.env.FRONTEND_DOMAIN ?? "https://main.d2tiu08u9zzp7o.amplifyapp.com";
+    const allowedOrigins = Array.from(
+      new Set(["http://localhost:5173", hostedFrontendDomain].filter(Boolean))
+    );
+
     const sharedEnvironment = {
-      ALLOWED_ORIGIN: "http://localhost:5173"
+      ALLOWED_ORIGINS: allowedOrigins.join(","),
+      ALLOWED_ORIGIN: allowedOrigins[0] ?? "http://localhost:5173"
     };
 
     const sharedFunctionProps = {
@@ -212,7 +219,7 @@ export class GroupExpensesStack extends Stack {
         allowCredentials: true,
         allowHeaders: ["*"],
         allowMethods: [CorsHttpMethod.ANY],
-        allowOrigins: ["http://localhost:5173"],
+        allowOrigins: allowedOrigins,
         maxAge: Duration.hours(12)
       }
     });
@@ -251,12 +258,32 @@ export class GroupExpensesStack extends Stack {
       value: httpApi.apiEndpoint
     });
 
+    new CfnOutput(this, "WebEnvViteApiUrl", {
+      value: `VITE_API_URL=${httpApi.apiEndpoint}`,
+      description: "Copy-paste env var for the web app"
+    });
+
+    new CfnOutput(this, "WebEnvViteRegion", {
+      value: `VITE_REGION=${this.region}`,
+      description: "Copy-paste env var for the web app"
+    });
+
     new CfnOutput(this, "UserPoolId", {
       value: userPool.userPoolId
     });
 
+    new CfnOutput(this, "WebEnvViteUserPoolId", {
+      value: `VITE_USER_POOL_ID=${userPool.userPoolId}`,
+      description: "Copy-paste env var for the web app"
+    });
+
     new CfnOutput(this, "UserPoolClientId", {
       value: userPoolClient.userPoolClientId
+    });
+
+    new CfnOutput(this, "WebEnvViteUserPoolClientId", {
+      value: `VITE_USER_POOL_CLIENT_ID=${userPoolClient.userPoolClientId}`,
+      description: "Copy-paste env var for the web app"
     });
 
     new CfnOutput(this, "ReceiptBucketName", {

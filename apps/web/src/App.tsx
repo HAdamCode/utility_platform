@@ -14,6 +14,7 @@ import TripDetailPage from "./pages/TripDetailPage";
 import { useMemo } from "react";
 import ModuleHub from "./pages/ModuleHub";
 import { modules } from "./modules/registry";
+import { WorkspaceBadgeIcon } from "./components/icons/UtilityIcons";
 
 const queryClient = new QueryClient();
 const GroupExpensesModule = () => <Outlet />;
@@ -24,9 +25,12 @@ const App = () => {
       SignIn: {
         Header() {
           return (
-            <div style={{ paddingBottom: "1rem" }}>
-              <h2>Utility Workspace</h2>
-              <p>Single sign-on for every tool in the suite.</p>
+            <div className="auth-hero">
+              <WorkspaceBadgeIcon className="auth-hero-icon" />
+              <div>
+                <h2>Utility Workspace</h2>
+                <p>Single sign-on for every tool in the suite.</p>
+              </div>
             </div>
           );
         }

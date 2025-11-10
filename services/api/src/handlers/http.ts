@@ -21,10 +21,30 @@ const noContent = (origin: string): APIGatewayProxyResultV2 => ({
   headers: corsHeaders(origin)
 });
 
-const DEFAULT_ORIGIN = process.env.ALLOWED_ORIGIN ?? "http://localhost:5173";
+const parseAllowedOrigins = (): string[] => {
+  if (process.env.ALLOWED_ORIGINS) {
+    return process.env.ALLOWED_ORIGINS.split(",")
+      .map(origin => origin.trim())
+      .filter(Boolean);
+  }
 
-const getOrigin = (event: APIGatewayProxyEventV2): string =>
-  event.headers?.origin ?? event.headers?.Origin ?? DEFAULT_ORIGIN;
+  if (process.env.ALLOWED_ORIGIN) {
+    return [process.env.ALLOWED_ORIGIN];
+  }
+
+  return ["http://localhost:5173"];
+};
+
+const allowedOrigins = parseAllowedOrigins();
+const DEFAULT_ORIGIN = allowedOrigins[0];
+
+const getOrigin = (event: APIGatewayProxyEventV2): string => {
+  const requestOrigin = event.headers?.origin ?? event.headers?.Origin;
+  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+  return DEFAULT_ORIGIN;
+};
 
 export const handler = async (
   event: APIGatewayProxyEventV2
