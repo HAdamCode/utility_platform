@@ -1,0 +1,8 @@
+{
+  "app": "npx ts-node --esm --project tsconfig.json bin/group-expenses.ts",
+  "context": {
+    "@aws-cdk/core:newStyleStackSynthesis": true,
+    "@aws-cdk/aws-lambda:recognizeVersionProps": true,
+    "aws-cdk:enableDiffNoFail": "true"
+  }
+}

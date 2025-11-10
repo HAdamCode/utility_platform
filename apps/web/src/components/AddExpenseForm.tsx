@@ -1,0 +1,1044 @@
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../lib/api";
+import type { TripMember, Receipt, TextractExtraction } from "../types";
+
+const roundToCents = (value: number): number =>
+  Math.round((value + Number.EPSILON) * 100) / 100;
+
+const parseCurrencyInput = (value: string): number => {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return roundToCents(parsed);
+};
+
+const distributeEvenly = (
+  amount: number,
+  memberIds: string[]
+): Record<string, number> => {
+  if (memberIds.length === 0 || Math.abs(amount) < 0.0001) {
+    return {};
+  }
+
+  const totalCents = Math.round(amount * 100);
+  const absoluteCents = Math.abs(totalCents);
+  const baseShare = Math.floor(absoluteCents / memberIds.length);
+  let remainder = absoluteCents - baseShare * memberIds.length;
+  const sign = totalCents < 0 ? -1 : 1;
+
+  return memberIds.reduce<Record<string, number>>((acc, memberId) => {
+    let cents = baseShare;
+    if (remainder > 0) {
+      cents += 1;
+      remainder -= 1;
+    }
+    acc[memberId] = (cents * sign) / 100;
+    return acc;
+  }, {});
+};
+
+interface AllocationDetail {
+  memberId: string;
+  baseAmount: number;
+  extrasShare: number;
+  amount: number;
+}
+
+const computeCustomAllocations = (
+  sharedMembers: TripMember[],
+  allocationInputs: Record<string, string>,
+  extrasTotal: number,
+  splitExtrasEvenly: boolean
+): { perMember: AllocationDetail[]; total: number; baseTotal: number; extras: Record<string, number> } => {
+  const memberIds = sharedMembers.map((member) => member.memberId);
+  const extrasDistribution = splitExtrasEvenly
+    ? distributeEvenly(extrasTotal, memberIds)
+    : {};
+
+  let totalCents = 0;
+  let baseTotalCents = 0;
+
+  const perMember = sharedMembers.map((member) => {
+    const baseAmount = parseCurrencyInput(
+      allocationInputs[member.memberId] ?? "0"
+    );
+    const extrasShare = extrasDistribution[member.memberId] ?? 0;
+    const amount = roundToCents(baseAmount + extrasShare);
+    baseTotalCents += Math.round(baseAmount * 100);
+    totalCents += Math.round(amount * 100);
+    return {
+      memberId: member.memberId,
+      baseAmount,
+      extrasShare,
+      amount
+    };
+  });
+
+  return {
+    perMember,
+    total: totalCents / 100,
+    baseTotal: baseTotalCents / 100,
+    extras: extrasDistribution
+  };
+};
+
+const inferPreviewType = (fileName?: string, contentType?: string | null) => {
+  const normalizedType = contentType?.toLowerCase();
+  if (normalizedType) {
+    if (normalizedType.includes("pdf")) {
+      return "application/pdf";
+    }
+    if (normalizedType.startsWith("image/")) {
+      return "image";
+    }
+  }
+
+  if (fileName) {
+    const lower = fileName.toLowerCase();
+    if (lower.endsWith(".pdf")) {
+      return "application/pdf";
+    }
+    if (/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(lower)) {
+      return "image";
+    }
+  }
+
+  return null;
+};
+
+const readFileAsBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        const base64 = result.includes(",") ? result.split(",")[1] : result;
+        resolve(base64);
+      } else {
+        reject(new Error("Unable to read receipt file"));
+      }
+    };
+    reader.onerror = () => {
+      reject(reader.error ?? new Error("Unable to read receipt file"));
+    };
+    reader.readAsDataURL(file);
+  });
+
+export interface CreateExpenseInput {
+  description: string;
+  vendor?: string;
+  category?: string;
+  total: number;
+  currency: string;
+  tax?: number;
+  tip?: number;
+  paidByMemberId: string;
+  sharedWithMemberIds: string[];
+  splitEvenly: boolean;
+  allocations?: { memberId: string; amount: number }[];
+  receiptId?: string;
+}
+
+interface AddExpenseFormProps {
+  tripId: string;
+  members: TripMember[];
+  currency: string;
+  receipts: Receipt[];
+  onSubmit: (payload: CreateExpenseInput) => Promise<void>;
+  isSubmitting: boolean;
+  currentUserId?: string;
+}
+
+const AddExpenseForm = ({
+  tripId,
+  members,
+  currency,
+  receipts,
+  onSubmit,
+  isSubmitting,
+  currentUserId
+}: AddExpenseFormProps) => {
+  const [description, setDescription] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [category, setCategory] = useState("");
+  const [subtotalInput, setSubtotalInput] = useState("");
+  const [taxInput, setTaxInput] = useState("");
+  const [tipInput, setTipInput] = useState("");
+
+  const preferredPayer = useMemo(() => {
+    if (
+      currentUserId &&
+      members.some((member) => member.memberId === currentUserId)
+    ) {
+      return currentUserId;
+    }
+    return members[0]?.memberId ?? "";
+  }, [currentUserId, members]);
+
+  const [paidBy, setPaidBy] = useState<string>(preferredPayer);
+  const [payerManuallySelected, setPayerManuallySelected] = useState(false);
+  const [sharedWith, setSharedWith] = useState<string[]>(
+    members.map((member) => member.memberId)
+  );
+  const [splitEvenly, setSplitEvenly] = useState(true);
+  const [splitExtrasEvenly, setSplitExtrasEvenly] = useState(false);
+  const [allocations, setAllocations] = useState<Record<string, string>>({});
+  const [receiptId, setReceiptId] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const [receiptStatusMessage, setReceiptStatusMessage] = useState<string | null>(null);
+  const [parseStatus, setParseStatus] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [isParsingReceipt, setIsParsingReceipt] = useState(false);
+  const liveReceiptInputRef = useRef<HTMLInputElement | null>(null);
+  const [isFetchingReceiptUrl, setIsFetchingReceiptUrl] = useState(false);
+  const [receiptPreviewError, setReceiptPreviewError] = useState<string | null>(null);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  const [receiptPreviewType, setReceiptPreviewType] = useState<string | null>(null);
+  const [activeReceiptId, setActiveReceiptId] = useState<string | null>(null);
+  const liveReceiptObjectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!payerManuallySelected) {
+      setPaidBy(preferredPayer);
+    }
+  }, [preferredPayer, payerManuallySelected]);
+
+  useEffect(() => {
+    const validMemberIds = new Set(members.map((member) => member.memberId));
+    setSharedWith((current) => current.filter((memberId) => validMemberIds.has(memberId)));
+  }, [members]);
+
+  useEffect(() => {
+    setAllocations((current) => {
+      const next: Record<string, string> = {};
+      sharedWith.forEach((memberId) => {
+        if (current[memberId] !== undefined) {
+          next[memberId] = current[memberId];
+        }
+      });
+      return next;
+    });
+  }, [sharedWith]);
+
+  const currencyFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+    [currency]
+  );
+
+  const formatAmount = useCallback(
+    (value: number) => currencyFormatter.format(Number.isFinite(value) ? value : 0),
+    [currencyFormatter]
+  );
+
+  const subtotalValue = useMemo(() => parseCurrencyInput(subtotalInput), [subtotalInput]);
+  const taxValue = useMemo(() => parseCurrencyInput(taxInput), [taxInput]);
+  const tipValue = useMemo(() => parseCurrencyInput(tipInput), [tipInput]);
+
+  const extrasTotal = useMemo(
+    () => roundToCents(taxValue + tipValue),
+    [taxValue, tipValue]
+  );
+  const grossTotal = useMemo(
+    () => roundToCents(subtotalValue + taxValue + tipValue),
+    [subtotalValue, taxValue, tipValue]
+  );
+  const hasExtras = extrasTotal > 0.0001;
+
+  const sharedMembers = useMemo(
+    () => members.filter((member) => sharedWith.includes(member.memberId)),
+    [members, sharedWith]
+  );
+
+  const customAllocationPreview = useMemo(
+    () =>
+      computeCustomAllocations(
+        sharedMembers,
+        allocations,
+        extrasTotal,
+        splitExtrasEvenly
+      ),
+    [sharedMembers, allocations, extrasTotal, splitExtrasEvenly]
+  );
+
+  const allocationPreviewByMemberId = useMemo(() => {
+    const map: Record<string, AllocationDetail> = {};
+    customAllocationPreview.perMember.forEach((detail) => {
+      map[detail.memberId] = detail;
+    });
+    return map;
+  }, [customAllocationPreview]);
+
+  const allocationDelta = useMemo(
+    () => roundToCents(customAllocationPreview.total - grossTotal),
+    [customAllocationPreview, grossTotal]
+  );
+
+  const allocationStatusMessage = useMemo(() => {
+    if (grossTotal <= 0) {
+      return "Enter an amount above to start allocating.";
+    }
+    if (Math.abs(allocationDelta) <= 0.01) {
+      return "Ready to save";
+    }
+    return allocationDelta > 0
+      ? `Over by ${formatAmount(allocationDelta)}`
+      : `Short by ${formatAmount(Math.abs(allocationDelta))}`;
+  }, [grossTotal, allocationDelta, formatAmount]);
+
+  const allocationStatusColor = useMemo(() => {
+    if (grossTotal <= 0) {
+      return undefined;
+    }
+    if (Math.abs(allocationDelta) <= 0.01) {
+      return "#34d399";
+    }
+    return allocationDelta > 0 ? "#f87171" : "#facc15";
+  }, [grossTotal, allocationDelta]);
+
+  const resetReceiptPreview = useCallback(() => {
+    if (liveReceiptObjectUrlRef.current) {
+      URL.revokeObjectURL(liveReceiptObjectUrlRef.current);
+      liveReceiptObjectUrlRef.current = null;
+    }
+    setReceiptPreviewUrl(null);
+    setReceiptPreviewType(null);
+    setActiveReceiptId(null);
+  }, []);
+
+  useEffect(() => () => resetReceiptPreview(), [resetReceiptPreview]);
+
+  const applyExtraction = useCallback(
+    (extraction: TextractExtraction | undefined) => {
+      if (!extraction) return;
+
+      const {
+        merchantName,
+        subtotal: extractedSubtotal,
+        total: extractedTotal,
+        tax: extractedTax,
+        tip: extractedTip,
+        lineItems
+      } = extraction;
+
+      if (merchantName) {
+        setDescription(merchantName);
+        setVendor(merchantName);
+      }
+
+      if (!category && lineItems?.length) {
+        const firstItem = lineItems.find((item) => item.description);
+        if (firstItem?.description) {
+          const normalized = firstItem.description.toLowerCase();
+          if (normalized.includes("food") || normalized.includes("meal") || normalized.includes("restaurant")) {
+            setCategory("Meals");
+          } else if (normalized.includes("hotel") || normalized.includes("lodging")) {
+            setCategory("Lodging");
+          } else if (normalized.includes("ticket") || normalized.includes("ride")) {
+            setCategory("Transport");
+          } else if (normalized.includes("fuel") || normalized.includes("gas")) {
+            setCategory("Fuel");
+          } else {
+            setCategory(firstItem.description);
+          }
+        }
+      }
+
+      if (typeof extractedSubtotal === "number") {
+        setSubtotalInput(extractedSubtotal.toString());
+      } else if (typeof extractedTotal === "number") {
+        const derivedSubtotal = roundToCents(
+          extractedTotal - (extractedTax ?? 0) - (extractedTip ?? 0)
+        );
+        if (derivedSubtotal > 0) {
+          setSubtotalInput(derivedSubtotal.toString());
+        } else {
+          setSubtotalInput(extractedTotal.toString());
+        }
+      }
+
+      if (typeof extractedTax === "number") {
+        setTaxInput(extractedTax.toString());
+      }
+      if (typeof extractedTip === "number") {
+        setTipInput(extractedTip.toString());
+      }
+    },
+    [category]
+  );
+
+  const loadReceiptPreview = useCallback(
+    async (receipt: Receipt) => {
+      if (!receipt.storageKey) {
+        setReceiptPreviewError("Receipt file is not available yet");
+        return;
+      }
+
+      setReceiptPreviewError(null);
+      setIsFetchingReceiptUrl(true);
+      try {
+        if (liveReceiptObjectUrlRef.current) {
+          URL.revokeObjectURL(liveReceiptObjectUrlRef.current);
+          liveReceiptObjectUrlRef.current = null;
+        }
+        const response = await api.get<{ url: string }>(
+          `/trips/${tripId}/receipts/${receipt.receiptId}`
+        );
+        setReceiptPreviewUrl(response.url);
+        setReceiptPreviewType(inferPreviewType(receipt.fileName));
+        setActiveReceiptId(receipt.receiptId);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Unable to load receipt preview";
+        setReceiptPreviewError(message);
+      } finally {
+        setIsFetchingReceiptUrl(false);
+      }
+    },
+    [tripId]
+  );
+
+  useEffect(() => {
+    if (!receiptId) {
+      setReceiptStatusMessage(null);
+      if (activeReceiptId !== "__local__") {
+        resetReceiptPreview();
+      }
+      return;
+    }
+
+    const receipt = receipts.find((item) => item.receiptId === receiptId);
+    if (!receipt) {
+      setReceiptStatusMessage(null);
+      return;
+    }
+
+    setReceiptPreviewError(null);
+
+    if (receipt.status === "COMPLETED") {
+      if (activeReceiptId === "__local__") {
+        resetReceiptPreview();
+      }
+      applyExtraction(receipt.extractedData);
+      setReceiptStatusMessage("Fields pre-filled using receipt data. Please review before saving.");
+      if (receipt.storageKey && activeReceiptId !== receipt.receiptId) {
+        void loadReceiptPreview(receipt);
+      }
+    } else if (receipt.status === "PROCESSING") {
+      setReceiptStatusMessage("Receipt is still being processed. Try refreshing in a moment.");
+      if (activeReceiptId !== "__local__") {
+        resetReceiptPreview();
+      }
+    } else if (receipt.status === "FAILED") {
+      setReceiptStatusMessage("Receipt processing failed. Enter details manually.");
+      if (activeReceiptId !== "__local__") {
+        resetReceiptPreview();
+      }
+    } else {
+      setReceiptStatusMessage(null);
+    }
+  }, [
+    receiptId,
+    receipts,
+    applyExtraction,
+    loadReceiptPreview,
+    resetReceiptPreview,
+    activeReceiptId
+  ]);
+
+  const handlePaidByChange = (memberId: string) => {
+    setPaidBy(memberId);
+    setPayerManuallySelected(true);
+    if (!sharedWith.includes(memberId)) {
+      setSharedWith((current) => [...current, memberId]);
+    }
+  };
+
+  const toggleSharedMember = (memberId: string) => {
+    setSharedWith((current) => {
+      if (current.includes(memberId)) {
+        return current.filter((id) => id !== memberId);
+      }
+      return [...current, memberId];
+    });
+  };
+
+  const handleAllocationChange = (memberId: string, value: string) => {
+    setAllocations((current) => ({
+      ...current,
+      [memberId]: value
+    }));
+  };
+
+  const handleLiveReceiptRequest = () => {
+    if (isParsingReceipt) return;
+    setParseError(null);
+    liveReceiptInputRef.current?.click();
+  };
+
+  const handleLiveReceiptSelected = async (
+    event: ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    event.target.value = "";
+    setParseError(null);
+    setParseStatus("Preparing receipt…");
+    setIsParsingReceipt(true);
+    setReceiptStatusMessage(null);
+    setReceiptId("");
+
+    if (liveReceiptObjectUrlRef.current) {
+      URL.revokeObjectURL(liveReceiptObjectUrlRef.current);
+    }
+    const objectUrl = URL.createObjectURL(file);
+    liveReceiptObjectUrlRef.current = objectUrl;
+    setReceiptPreviewUrl(objectUrl);
+    setReceiptPreviewType(inferPreviewType(file.name, file.type));
+    setActiveReceiptId("__local__");
+    setReceiptPreviewError(null);
+
+    try {
+      const base64 = await readFileAsBase64(file);
+      setParseStatus("Analyzing receipt…");
+      const response = await api.post<{ extraction: TextractExtraction }>(
+        `/trips/${tripId}/receipts/analyze`,
+        {
+          fileName: file.name,
+          contentType: file.type || undefined,
+          data: base64
+        }
+      );
+      applyExtraction(response.extraction);
+      setParseStatus("Receipt scanned. Review the details before saving.");
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Unable to analyze receipt";
+      setParseError(message);
+      setParseStatus(null);
+    } finally {
+      setIsParsingReceipt(false);
+    }
+  };
+
+  const handleOpenReceiptInNewTab = async () => {
+    if (!receiptId) return;
+    if (activeReceiptId === receiptId && receiptPreviewUrl) {
+      window.open(receiptPreviewUrl, "_blank", "noopener");
+      return;
+    }
+
+    const receipt = receipts.find((item) => item.receiptId === receiptId);
+    if (!receipt || !receipt.storageKey) {
+      setReceiptPreviewError("Receipt is not available yet");
+      return;
+    }
+
+    try {
+      setIsFetchingReceiptUrl(true);
+      const response = await api.get<{ url: string }>(
+        `/trips/${tripId}/receipts/${receipt.receiptId}`
+      );
+      window.open(response.url, "_blank", "noopener");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Unable to open receipt";
+      setReceiptPreviewError(message);
+    } finally {
+      setIsFetchingReceiptUrl(false);
+    }
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+
+    const trimmedDescription = description.trim();
+    if (!trimmedDescription) {
+      setError("Description is required");
+      return;
+    }
+    if (!paidBy) {
+      setError("Select who paid for this expense.");
+      return;
+    }
+    if (sharedWith.length === 0) {
+      setError("Select at least one person to share this expense.");
+      return;
+    }
+    if (grossTotal <= 0) {
+      setError("Enter a positive subtotal, tax, or tip before saving.");
+      return;
+    }
+
+    let allocationsPayload: { memberId: string; amount: number }[] = [];
+
+    if (splitEvenly) {
+      const distribution = distributeEvenly(grossTotal, sharedWith);
+      allocationsPayload = sharedWith.map((memberId) => ({
+        memberId,
+        amount: Math.abs(roundToCents(distribution[memberId] ?? 0))
+      }));
+    } else {
+      if (Math.abs(allocationDelta) > 0.01) {
+        setError(
+          `Allocated amounts must match the total (off by ${formatAmount(
+            Math.abs(allocationDelta)
+          )}).`
+        );
+        return;
+      }
+
+      allocationsPayload = customAllocationPreview.perMember.map((detail) => ({
+        memberId: detail.memberId,
+        amount: roundToCents(detail.amount)
+      }));
+    }
+
+    const payload: CreateExpenseInput = {
+      description: trimmedDescription,
+      vendor: vendor.trim() || undefined,
+      category: category.trim() || undefined,
+      total: grossTotal,
+      currency,
+      tax: taxValue > 0 ? taxValue : undefined,
+      tip: tipValue > 0 ? tipValue : undefined,
+      paidByMemberId: paidBy,
+      sharedWithMemberIds: sharedWith,
+      splitEvenly,
+      allocations: allocationsPayload,
+      receiptId: receiptId || undefined
+    };
+
+    try {
+      await onSubmit(payload);
+      setDescription("");
+      setVendor("");
+      setCategory("");
+      setSubtotalInput("");
+      setTaxInput("");
+      setTipInput("");
+      setSplitEvenly(true);
+      setSplitExtrasEvenly(false);
+      setAllocations({});
+      setReceiptId("");
+      setReceiptStatusMessage(null);
+      setParseStatus(null);
+      setParseError(null);
+      setReceiptPreviewError(null);
+      resetReceiptPreview();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to save expense";
+      setError(message);
+    }
+  };
+
+  const activeReceipt = useMemo(
+    () =>
+      activeReceiptId && activeReceiptId !== "__local__"
+        ? receipts.find((receipt) => receipt.receiptId === activeReceiptId)
+        : undefined,
+    [receipts, activeReceiptId]
+  );
+
+  const receiptPreviewCaption = useMemo(() => {
+    if (!receiptPreviewUrl) {
+      return null;
+    }
+    if (activeReceiptId === "__local__") {
+      return "Preview of the receipt you just selected. It is not attached to the expense yet.";
+    }
+    if (activeReceipt) {
+      return `Preview of ${activeReceipt.fileName}`;
+    }
+    return "Receipt preview";
+  }, [receiptPreviewUrl, activeReceiptId, activeReceipt]);
+
+  return (
+    <form className="list" onSubmit={handleSubmit}>
+      <div className="input-group">
+        <label htmlFor="expense-description">Description</label>
+        <input
+          id="expense-description"
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="Dinner at Bluebird Cafe"
+        />
+      </div>
+
+      <div className="input-group">
+        <label htmlFor="expense-vendor">Vendor (optional)</label>
+        <input
+          id="expense-vendor"
+          value={vendor}
+          onChange={(event) => setVendor(event.target.value)}
+          placeholder="Bluebird Cafe"
+        />
+      </div>
+
+      <div className="input-group">
+        <label htmlFor="expense-category">Category (optional)</label>
+        <input
+          id="expense-category"
+          value={category}
+          onChange={(event) => setCategory(event.target.value)}
+          placeholder="Meals"
+        />
+      </div>
+
+      <div className="input-group">
+        <label htmlFor="expense-subtotal">Subtotal ({currency})</label>
+        <input
+          id="expense-subtotal"
+          type="number"
+          inputMode="decimal"
+          min="0"
+          step="0.01"
+          value={subtotalInput}
+          onChange={(event) => setSubtotalInput(event.target.value)}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: "0.75rem" }}>
+        <div className="input-group" style={{ flex: 1 }}>
+          <label htmlFor="expense-tax">Tax ({currency})</label>
+          <input
+            id="expense-tax"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={taxInput}
+            onChange={(event) => setTaxInput(event.target.value)}
+          />
+        </div>
+        <div className="input-group" style={{ flex: 1 }}>
+          <label htmlFor="expense-tip">Tip ({currency})</label>
+          <input
+            id="expense-tip"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={tipInput}
+            onChange={(event) => setTipInput(event.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="input-group">
+        <label>Total (with tax & tip)</label>
+        <input type="text" readOnly value={formatAmount(grossTotal)} style={{ opacity: 0.75 }} />
+      </div>
+
+      <div
+        className="input-group"
+        style={{
+          border: "1px dashed rgba(148,163,184,0.3)",
+          borderRadius: "0.75rem",
+          padding: "0.75rem"
+        }}
+      >
+        <label>Quick receipt scan</label>
+        <p className="muted" style={{ marginTop: "0.25rem" }}>
+          Upload a receipt to automatically fill subtotal, tax, and tip instantly.
+        </p>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleLiveReceiptRequest}
+            disabled={isParsingReceipt}
+          >
+            {isParsingReceipt ? "Scanning…" : "Choose receipt"}
+          </button>
+          {parseStatus && <span className="muted">{parseStatus}</span>}
+          {parseError && <span style={{ color: "#f87171" }}>{parseError}</span>}
+        </div>
+        <input
+          ref={liveReceiptInputRef}
+          type="file"
+          accept="image/*,application/pdf"
+          style={{ display: "none" }}
+          onChange={handleLiveReceiptSelected}
+        />
+        {receiptPreviewUrl && (
+          <div style={{ marginTop: "0.75rem" }}>
+            <div
+              style={{
+                border: "1px solid rgba(148,163,184,0.14)",
+                borderRadius: "0.75rem",
+                padding: "0.75rem",
+                background: "rgba(15,23,42,0.45)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.75rem"
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  alignItems: "center",
+                  background: "rgba(15,23,42,0.6)",
+                  borderRadius: "0.5rem",
+                  padding: receiptPreviewType === "application/pdf" ? "0" : "0.75rem",
+                  minHeight: receiptPreviewType === "application/pdf" ? "220px" : "auto"
+                }}
+              >
+                {receiptPreviewType === "application/pdf" ? (
+                  <iframe
+                    title="Receipt preview"
+                    src={receiptPreviewUrl}
+                    style={{
+                      border: "none",
+                      width: "100%",
+                      height: "260px",
+                      borderRadius: "0.5rem"
+                    }}
+                  />
+                ) : receiptPreviewType === "image" ? (
+                  <img
+                    src={receiptPreviewUrl}
+                    alt="Receipt preview"
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: "320px",
+                      display: "block",
+                      borderRadius: "0.5rem"
+                    }}
+                  />
+                ) : (
+                  <a
+                    href={receiptPreviewUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="secondary"
+                  >
+                    Open receipt preview
+                  </a>
+                )}
+              </div>
+              {receiptPreviewCaption && (
+                <p className="muted" style={{ margin: 0 }}>
+                  {receiptPreviewCaption}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="input-group">
+        <label htmlFor="expense-paid-by">Who paid?</label>
+        <select
+          id="expense-paid-by"
+          value={paidBy}
+          onChange={(event) => handlePaidByChange(event.target.value)}
+        >
+          {members.map((member) => (
+            <option key={member.memberId} value={member.memberId}>
+              {member.displayName}
+              {currentUserId === member.memberId ? " (you)" : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="input-group">
+        <label>Split with</label>
+        <div className="list">
+          {members.map((member) => (
+            <label
+              key={member.memberId}
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
+              <input
+                type="checkbox"
+                checked={sharedWith.includes(member.memberId)}
+                onChange={() => toggleSharedMember(member.memberId)}
+              />
+              {member.displayName}
+              {currentUserId === member.memberId ? " (you)" : ""}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="input-group">
+        <label>Split mode</label>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <button
+            type="button"
+            className={splitEvenly ? "primary" : "secondary"}
+            onClick={() => {
+              setSplitEvenly(true);
+              setSplitExtrasEvenly(false);
+            }}
+          >
+            Evenly
+          </button>
+          <button
+            type="button"
+            className={!splitEvenly ? "primary" : "secondary"}
+            onClick={() => setSplitEvenly(false)}
+          >
+            Custom amounts
+          </button>
+        </div>
+      </div>
+
+      {!splitEvenly && (
+        <>
+          <div className="list">
+            {sharedMembers.map((member) => {
+              const preview = allocationPreviewByMemberId[member.memberId];
+              const extrasShare = preview?.extrasShare ?? 0;
+              const finalAmount =
+                preview?.amount ??
+                parseCurrencyInput(allocations[member.memberId] ?? "0");
+
+              return (
+                <div key={member.memberId} className="input-group">
+                  <label>{member.displayName}</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="0.01"
+                    value={allocations[member.memberId] ?? ""}
+                    onChange={(event) =>
+                      handleAllocationChange(member.memberId, event.target.value)
+                    }
+                  />
+                  {splitExtrasEvenly && Math.abs(extrasShare) >= 0.005 && (
+                    <p className="muted" style={{ marginTop: "0.25rem" }}>
+                      Includes {formatAmount(extrasShare)} tax & tip · Final:{" "}
+                      {formatAmount(finalAmount)}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="input-group">
+            <label>Tax & tip sharing</label>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+                marginTop: "0.5rem"
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={splitExtrasEvenly}
+                onChange={(event) => setSplitExtrasEvenly(event.target.checked)}
+              />
+              Split tax and tip evenly
+            </label>
+            <p className="muted" style={{ marginTop: "0.5rem" }}>
+              {hasExtras
+                ? sharedMembers.length > 0
+                  ? `Adds ${formatAmount(extrasTotal)} across ${sharedMembers.length} ${
+                      sharedMembers.length === 1 ? "person" : "people"
+                    }.`
+                  : "Select at least one person to split the tax and tip."
+                : "Enter tax or tip above to include them automatically."}
+            </p>
+          </div>
+          <div className="input-group">
+            <label>Allocation summary</label>
+            <p
+              className="muted"
+              style={{
+                marginTop: "0.5rem",
+                color: grossTotal > 0 ? allocationStatusColor : undefined
+              }}
+            >
+              {grossTotal > 0 ? (
+                <>
+                  Allocated {formatAmount(customAllocationPreview.total)} of{" "}
+                  {formatAmount(grossTotal)} · {allocationStatusMessage}
+                </>
+              ) : (
+                "Enter a subtotal, tax, or tip to start allocating."
+              )}
+            </p>
+          </div>
+        </>
+      )}
+
+      {receipts.length > 0 && (
+        <div className="input-group">
+          <label htmlFor="expense-receipt">Attach receipt (optional)</label>
+          <select
+            id="expense-receipt"
+            value={receiptId}
+            onChange={(event) => {
+              setReceiptId(event.target.value);
+              setReceiptStatusMessage(null);
+              setReceiptPreviewError(null);
+              if (!event.target.value && activeReceiptId !== "__local__") {
+                resetReceiptPreview();
+              }
+            }}
+          >
+            <option value="">None</option>
+            {receipts.map((receipt) => (
+              <option key={receipt.receiptId} value={receipt.receiptId}>
+                {receipt.fileName} ({receipt.status.toLowerCase()})
+              </option>
+            ))}
+          </select>
+          {receiptId && (
+            <div
+              style={{
+                marginTop: "0.5rem",
+                display: "flex",
+                gap: "0.5rem",
+                alignItems: "center"
+              }}
+            >
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleOpenReceiptInNewTab}
+                disabled={isFetchingReceiptUrl}
+              >
+                {isFetchingReceiptUrl ? "Opening…" : "Open full size"}
+              </button>
+              {receiptPreviewError && (
+                <span style={{ color: "#f87171" }}>{receiptPreviewError}</span>
+              )}
+            </div>
+          )}
+          {receiptStatusMessage && (
+            <p className="muted" style={{ marginTop: "0.5rem" }}>
+              {receiptStatusMessage}
+            </p>
+          )}
+        </div>
+      )}
+
+      {error && <p style={{ color: "#fda4af" }}>{error}</p>}
+
+      <button type="submit" className="primary" disabled={isSubmitting}>
+        {isSubmitting ? "Saving…" : "Add expense"}
+      </button>
+    </form>
+  );
+};
+
+export default AddExpenseForm;

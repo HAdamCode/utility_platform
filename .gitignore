@@ -1,0 +1,63 @@
+# macOS
+.DS_Store
+
+# IDE/editor
+.idea/
+.vscode/
+*.iml
+
+# Node / TypeScript
+node_modules/
+**/node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# AWS CDK
+cdk.out/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-configuration
+# Keep pubspec.lock files checked in for apps
+
+# Flutter build artifacts
+**/build/
+**/ios/Flutter/App.framework
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/ephemeral/
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Runner/GeneratedPluginRegistrant.*
+**/android/.gradle/
+**/android/app/local.properties
+**/android/app/debug
+**/android/app/profile
+**/android/app/release
+**/linux/flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/macos/Flutter/GeneratedPluginRegistrant.*
+**/macos/Pods/
+**/web/.dart_tool/
+**/web/compiled/
+**/windows/flutter/ephemeral/
+
+# Generated IDE user-specific files
+**/*.swp
+**/*.swo
+*.log

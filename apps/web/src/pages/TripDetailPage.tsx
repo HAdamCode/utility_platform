@@ -1,0 +1,1652 @@
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate, useParams } from "react-router-dom";
+import { useAuthenticator } from "@aws-amplify/ui-react";
+import AddExpenseForm, { type CreateExpenseInput } from "../components/AddExpenseForm";
+import SettlementForm from "../components/SettlementForm";
+import { api, ApiError, searchUsers as searchUsersRequest } from "../lib/api";
+import type {
+  TripSummary,
+  Expense,
+  Settlement,
+  UserProfile,
+  BalanceRow
+} from "../types";
+
+type TripTab = "overview" | "expenses" | "settlements" | "people";
+
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedValue(value), delay);
+    return () => clearTimeout(handle);
+  }, [value, delay]);
+
+  return debouncedValue;
+}
+
+const computeSettlementSuggestions = (balances: BalanceRow[]) => {
+  const creditors: Array<{ memberId: string; amount: number }> = [];
+  const debtors: Array<{ memberId: string; amount: number }> = [];
+
+  balances.forEach((balance) => {
+    if (balance.balance > 0.01) {
+      creditors.push({ memberId: balance.memberId, amount: balance.balance });
+    } else if (balance.balance < -0.01) {
+      debtors.push({ memberId: balance.memberId, amount: Math.abs(balance.balance) });
+    }
+  });
+
+  if (!creditors.length || !debtors.length) {
+    return [] as Array<{ from: string; to: string; amount: number }>;
+  }
+
+  const suggestions: Array<{ from: string; to: string; amount: number }> = [];
+  let creditorIndex = 0;
+  let debtorIndex = 0;
+
+  while (creditorIndex < creditors.length && debtorIndex < debtors.length) {
+    const creditor = creditors[creditorIndex];
+    const debtor = debtors[debtorIndex];
+    const amount = Math.min(creditor.amount, debtor.amount);
+
+    suggestions.push({
+      from: debtor.memberId,
+      to: creditor.memberId,
+      amount: Math.round(amount * 100) / 100
+    });
+
+    creditor.amount -= amount;
+    debtor.amount -= amount;
+
+    if (creditor.amount <= 0.01) {
+      creditorIndex += 1;
+    }
+    if (debtor.amount <= 0.01) {
+      debtorIndex += 1;
+    }
+  }
+
+  return suggestions;
+};
+
+const formatDate = (isoString: string) => {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) {
+    return "Unknown date";
+  }
+
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(date);
+  } catch {
+    return date.toLocaleString();
+  }
+};
+
+const TripDetailPage = () => {
+  const { tripId } = useParams<{ tripId: string }>();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { user } = useAuthenticator((context) => [context.user]);
+  const loggedInUserId =
+    user?.userId ??
+    (user?.attributes as Record<string, string> | undefined)?.sub ??
+    user?.username ??
+    undefined;
+
+  const [activeTab, setActiveTab] = useState<TripTab>("overview");
+  const [memberSearchTerm, setMemberSearchTerm] = useState("");
+  const [memberFeedback, setMemberFeedback] = useState<string | null>(null);
+
+  const queryKey = useMemo(() => ["trip", tripId], [tripId]);
+
+  const { data, isLoading, error } = useQuery({
+    queryKey,
+    queryFn: () => api.get<TripSummary>(`/trips/${tripId}`),
+    enabled: Boolean(tripId)
+  });
+
+  const createExpenseMutation = useMutation({
+    mutationFn: (payload: CreateExpenseInput) =>
+      api.post<Expense>(`/trips/${tripId}/expenses`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+    }
+  });
+
+  const deleteExpenseMutation = useMutation<void, unknown, string>({
+    mutationFn: (expenseId: string) => {
+      if (!tripId) {
+        throw new Error("Trip not found");
+      }
+      return api.delete<void>(`/trips/${tripId}/expenses/${expenseId}`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+    }
+  });
+
+  const settlementMutation = useMutation({
+    mutationFn: (payload: {
+      fromMemberId: string;
+      toMemberId: string;
+      amount: number;
+      note?: string;
+    }) => api.post<Settlement>(`/trips/${tripId}/settlements`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+    }
+  });
+
+  const deleteSettlementMutation = useMutation<void, unknown, string>({
+    mutationFn: (settlementId: string) => {
+      if (!tripId) {
+        throw new Error("Trip not found");
+      }
+      return api.delete<void>(
+        `/trips/${tripId}/settlements/${settlementId}`
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+    }
+  });
+
+  const confirmSettlementMutation = useMutation({
+    mutationFn: (payload: { settlementId: string; confirmed: boolean }) =>
+      api.patch<void>(
+        `/trips/${tripId}/settlements/${payload.settlementId}`,
+        { confirmed: payload.confirmed }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+    }
+  });
+
+  const addMemberMutation = useMutation({
+    mutationFn: (payload: { members: { userId: string }[] }) =>
+      api.post(`/trips/${tripId}/members`, payload),
+    onMutate: () => {
+      setMemberFeedback(null);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      setMemberFeedback("Member added to trip");
+    },
+    onError: (err: unknown) => {
+      if (err instanceof ApiError) {
+        setMemberFeedback(err.message);
+      } else {
+        setMemberFeedback("Failed to add member");
+      }
+    }
+  });
+
+  const removeMemberMutation = useMutation<void, unknown, string>({
+    mutationFn: (memberId: string) => {
+      if (!tripId) {
+        throw new Error("Trip not found");
+      }
+      return api.delete<void>(`/trips/${tripId}/members/${memberId}`);
+    },
+    onMutate: () => {
+      setMemberFeedback(null);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      setMemberFeedback("Member removed from trip");
+    },
+    onError: (err: unknown) => {
+      if (err instanceof ApiError) {
+        setMemberFeedback(err.message);
+      } else {
+        setMemberFeedback("Failed to remove member");
+      }
+    }
+  });
+
+  const handleSearchTermChange = (value: string) => {
+    setMemberSearchTerm(value);
+    setMemberFeedback(null);
+  };
+
+  const debouncedSearch = useDebouncedValue(memberSearchTerm, 250);
+  const trimmedSearch = debouncedSearch.trim();
+  const shouldSearch = trimmedSearch.length >= 1;
+
+  const userSearchQuery = useQuery({
+    queryKey: ["user-search", trimmedSearch],
+    queryFn: () => searchUsersRequest(trimmedSearch).then((res) => res.users),
+    enabled: shouldSearch
+  });
+
+  const memberSearchResults = shouldSearch ? userSearchQuery.data ?? [] : [];
+
+  const memberSearchMessage = useMemo(() => {
+    if (!memberSearchTerm.trim()) {
+      return "Start typing to find people by name or email.";
+    }
+
+    if (!shouldSearch) {
+      return "Keep typing to search.";
+    }
+
+    if (userSearchQuery.isFetching) {
+      return "Searching…";
+    }
+
+    if (userSearchQuery.isError) {
+      const err = userSearchQuery.error;
+      return err instanceof ApiError ? err.message : "Unable to search users.";
+    }
+
+    if (memberSearchResults.length === 0) {
+      return "No matches yet.";
+    }
+
+    return null;
+  }, [memberSearchTerm, shouldSearch, userSearchQuery.isFetching, userSearchQuery.isError, userSearchQuery.error, memberSearchResults.length]);
+
+  const membersById = useMemo(() => {
+    if (!data?.members) return {} as Record<string, string>;
+    const currentId = loggedInUserId ?? data.currentUserId;
+    return Object.fromEntries(
+      data.members.map((member) => [
+        member.memberId,
+        `${member.displayName ?? member.email ?? member.memberId}${member.memberId === currentId ? " (you)" : ""}`
+      ])
+    );
+  }, [data?.members, data?.currentUserId, loggedInUserId]);
+
+  const settlementSuggestions = useMemo(
+    () => computeSettlementSuggestions(data?.balances ?? []),
+    [data?.balances]
+  );
+
+  if (!tripId) {
+    return <p className="muted">No trip selected.</p>;
+  }
+
+  if (isLoading) {
+    return <p className="muted">Loading trip details…</p>;
+  }
+
+  if (error || !data) {
+    return <p className="muted">Unable to load trip. Please try again.</p>;
+  }
+
+  const { trip, members, expenses, receipts, balances, settlements, pendingSettlements } = data;
+  const effectiveCurrentUserId = loggedInUserId ?? data.currentUserId;
+  const canManageMembers = trip.ownerId === effectiveCurrentUserId;
+
+  return (
+    <div className="trip-detail">
+      <section className="card" style={{ marginBottom: "1rem" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "1rem"
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0 }}>{trip.name}</h2>
+            <p className="muted" style={{ margin: "0.5rem 0 0" }}>
+              {trip.startDate ? trip.startDate : "Flexible start"}
+              {trip.endDate ? ` → ${trip.endDate}` : ""} • {trip.currency}
+            </p>
+          </div>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => navigate("/group-expenses/trips")}
+          >
+            Back to trips
+          </button>
+        </div>
+        <div
+          className="list"
+          style={{ marginTop: "1rem", flexDirection: "row", gap: "0.5rem", flexWrap: "wrap" }}
+        >
+          {[
+            { id: "overview", label: "Overview" },
+            { id: "expenses", label: "Expenses" },
+            { id: "settlements", label: "Settlements" },
+            { id: "people", label: "People" }
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={activeTab === tab.id ? "primary" : "secondary"}
+              onClick={() => setActiveTab(tab.id as TripTab)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {activeTab === "overview" && (
+        <OverviewTab
+          balances={balances}
+          membersById={membersById}
+          settlementSuggestions={settlementSuggestions}
+          currency={trip.currency}
+        />
+      )}
+
+      {activeTab === "expenses" && (
+        <ExpensesTab
+          receipts={receipts}
+          tripId={trip.tripId}
+          members={members}
+          expenses={expenses}
+          currency={trip.currency}
+          onCreateExpense={(input) =>
+            createExpenseMutation.mutateAsync(input)
+          }
+          isCreating={createExpenseMutation.isPending}
+          membersById={membersById}
+          onDeleteExpense={(expenseId) =>
+            deleteExpenseMutation.mutateAsync(expenseId)
+          }
+          deletePending={deleteExpenseMutation.isPending}
+          deletingExpenseId={deleteExpenseMutation.variables}
+          currentUserId={effectiveCurrentUserId}
+        />
+      )}
+
+      {activeTab === "settlements" && (
+        <SettlementsTab
+          currency={trip.currency}
+          members={members}
+          settlements={settlements}
+          pendingSettlements={pendingSettlements}
+          onRecord={(input) => settlementMutation.mutateAsync(input)}
+          isRecording={settlementMutation.isPending}
+          onConfirm={(settlementId, confirmed) =>
+            confirmSettlementMutation.mutate({ settlementId, confirmed })
+          }
+          confirmPending={confirmSettlementMutation.isPending}
+          membersById={membersById}
+          onDelete={(settlementId) =>
+            deleteSettlementMutation.mutateAsync(settlementId)
+          }
+          deletePending={deleteSettlementMutation.isPending}
+          deletingSettlementId={deleteSettlementMutation.variables}
+          currentUserId={effectiveCurrentUserId}
+        />
+      )}
+
+      {activeTab === "people" && (
+        <PeopleTab
+          members={members}
+          memberSearchTerm={memberSearchTerm}
+          onMemberSearchTermChange={handleSearchTermChange}
+          searchResults={memberSearchResults}
+          searchMessage={memberSearchMessage}
+          feedbackMessage={memberFeedback}
+          onAddMember={(userId) => addMemberMutation.mutate({ members: [{ userId }] })}
+          addLoading={addMemberMutation.isPending}
+          canManageMembers={canManageMembers}
+          ownerId={trip.ownerId}
+          onRemoveMember={(memberId) =>
+        removeMemberMutation.mutateAsync(memberId)
+      }
+      removeLoading={removeMemberMutation.isPending}
+      removingMemberId={removeMemberMutation.variables}
+      currentUserId={effectiveCurrentUserId}
+      membersById={membersById}
+    />
+      )}
+    </div>
+  );
+};
+
+interface OverviewTabProps {
+  balances: BalanceRow[];
+  membersById: Record<string, string>;
+  settlementSuggestions: Array<{ from: string; to: string; amount: number }>;
+  currency: string;
+}
+
+const OverviewTab = ({ balances, membersById, settlementSuggestions, currency }: OverviewTabProps) => (
+  <div className="grid-two">
+    <section className="card">
+      <div className="section-title">
+        <h2>Balances</h2>
+      </div>
+      <div className="list">
+        {balances.length === 0 ? (
+          <p className="muted">No balances yet.</p>
+        ) : (
+          balances.map((balance) => (
+            <div
+              key={balance.memberId}
+              className="card"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "0.75rem 1rem"
+              }}
+            >
+              <span>{membersById[balance.memberId] ?? balance.memberId}</span>
+              <strong
+                style={{
+                  color: balance.balance >= 0 ? "#4ade80" : "#f97316"
+                }}
+              >
+                {balance.balance.toFixed(2)} {currency}
+              </strong>
+            </div>
+          ))
+        )}
+      </div>
+    </section>
+
+    {settlementSuggestions.length > 0 && (
+      <section className="card">
+        <div className="section-title">
+          <h2>Suggested Settlements</h2>
+        </div>
+        <div className="list">
+          {settlementSuggestions.map((suggestion, index) => (
+            <div key={`${suggestion.from}-${suggestion.to}-${index}`} className="card" style={{ padding: "0.75rem 1rem" }}>
+              <p style={{ margin: 0 }}>
+                <strong>{membersById[suggestion.from] ?? suggestion.from}</strong> should pay {" "}
+                <strong>{suggestion.amount.toFixed(2)} {currency}</strong> to {" "}
+                <strong>{membersById[suggestion.to] ?? suggestion.to}</strong>
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="muted">
+          These suggestions settle the current balances assuming no additional expenses or settlements.
+        </p>
+      </section>
+    )}
+  </div>
+);
+
+interface ExpensesTabProps {
+  receipts: TripSummary["receipts"];
+  tripId: string;
+  members: TripSummary["members"];
+  expenses: TripSummary["expenses"];
+  currency: string;
+  onCreateExpense: (payload: CreateExpenseInput) => Promise<void>;
+  isCreating: boolean;
+  membersById: Record<string, string>;
+  onDeleteExpense: (expenseId: string) => Promise<void>;
+  deletePending: boolean;
+  deletingExpenseId?: string;
+  currentUserId?: string;
+}
+
+const ExpensesTab = ({
+  receipts,
+  tripId,
+  members,
+  expenses,
+  currency,
+  onCreateExpense,
+  isCreating,
+  membersById,
+  onDeleteExpense,
+  deletePending,
+  deletingExpenseId,
+  currentUserId
+}: ExpensesTabProps) => {
+  const [memberFilter, setMemberFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
+  const [viewingReceiptId, setViewingReceiptId] = useState<string | null>(null);
+  const [viewReceiptError, setViewReceiptError] = useState<string | null>(null);
+  const [expandedReceiptId, setExpandedReceiptId] = useState<string | null>(null);
+  const [receiptPreviewCache, setReceiptPreviewCache] = useState<
+    Record<string, { url: string; title: string; type: string | null }>
+  >({});
+
+  const formatCurrency = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+    [currency]
+  );
+
+  const categories = useMemo(() => {
+    const unique = new Set<string>();
+    expenses.forEach((expense) => {
+      if (expense.category) {
+        unique.add(expense.category);
+      }
+    });
+    return Array.from(unique).sort((a, b) => a.localeCompare(b));
+  }, [expenses]);
+
+  const filteredExpenses = useMemo(() => {
+    const fromDate = dateFrom ? new Date(dateFrom) : null;
+    const toDate = dateTo ? new Date(`${dateTo}T23:59:59.999`) : null;
+
+    return expenses.filter((expense) => {
+      if (memberFilter !== "all") {
+        const involvesMember =
+          expense.paidByMemberId === memberFilter ||
+          expense.sharedWithMemberIds.includes(memberFilter) ||
+          expense.allocations.some((allocation) => allocation.memberId === memberFilter);
+        if (!involvesMember) return false;
+      }
+
+      if (categoryFilter !== "all" && (expense.category ?? "") !== categoryFilter) {
+        return false;
+      }
+
+      const expenseDate = new Date(expense.createdAt);
+      if (!Number.isNaN(expenseDate.getTime())) {
+        if (fromDate && expenseDate < fromDate) return false;
+        if (toDate && expenseDate > toDate) return false;
+      }
+
+      return true;
+    });
+  }, [expenses, memberFilter, categoryFilter, dateFrom, dateTo]);
+
+  const perMemberTotals = useMemo(() => {
+    const totals = new Map<string, { paid: number; share: number }>();
+    members.forEach((member) => {
+      totals.set(member.memberId, { paid: 0, share: 0 });
+    });
+
+    filteredExpenses.forEach((expense) => {
+      const payerTotals = totals.get(expense.paidByMemberId);
+      if (payerTotals) {
+        payerTotals.paid += expense.total;
+      }
+      expense.allocations.forEach((allocation) => {
+        const entry = totals.get(allocation.memberId);
+        if (entry) {
+          entry.share += allocation.amount;
+        }
+      });
+    });
+
+    return members.map((member) => {
+      const entry = totals.get(member.memberId) ?? { paid: 0, share: 0 };
+      const net = entry.paid - entry.share;
+      return {
+        memberId: member.memberId,
+        name: membersById[member.memberId] ?? member.memberId,
+        paid: entry.paid,
+        share: entry.share,
+        net
+      };
+    });
+  }, [filteredExpenses, members, membersById]);
+
+  const suggestions = useMemo(() => {
+    const balanceRows = perMemberTotals.map((member) => ({
+      memberId: member.memberId,
+      displayName: member.name,
+      balance: Math.round(member.net * 100) / 100
+    }));
+    return computeSettlementSuggestions(balanceRows).filter((suggestion) => suggestion.amount > 0.01);
+  }, [perMemberTotals]);
+
+  const filteredTotal = useMemo(
+    () => filteredExpenses.reduce((sum, expense) => sum + expense.total, 0),
+    [filteredExpenses]
+  );
+
+  const receiptMetadata = useMemo(() => {
+    const usage = new Map<string, string>();
+    expenses.forEach((expense) => {
+      if (expense.receiptId) {
+        usage.set(expense.receiptId, expense.description);
+      }
+    });
+
+    const status = new Map<string, string>();
+    const storage = new Map<string, string | undefined>();
+    receipts.forEach((receipt) => {
+      status.set(receipt.receiptId, receipt.status);
+      storage.set(receipt.receiptId, receipt.storageKey);
+    });
+    return { usage, status, storage };
+  }, [expenses, receipts]);
+
+  useEffect(() => {
+    setReceiptPreviewCache((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      expenses.forEach((expense) => {
+        if (!expense.receiptId || !expense.receiptPreviewUrl) {
+          return;
+        }
+
+        const receipt = receipts.find(
+          (item) => item.receiptId === expense.receiptId
+        );
+        const title = receipt?.fileName ?? "Receipt";
+        const type = inferPreviewType(receipt?.fileName);
+        const existing = next[expense.receiptId];
+
+        if (!existing || existing.url !== expense.receiptPreviewUrl) {
+          next[expense.receiptId] = {
+            url: expense.receiptPreviewUrl,
+            title,
+            type
+          };
+          changed = true;
+        }
+      });
+
+      return changed ? next : current;
+    });
+  }, [expenses, receipts]);
+
+  useEffect(() => {
+    const pending = expenses
+      .map((expense) => expense.receiptId)
+      .filter((id): id is string => Boolean(id))
+      .filter((id) => {
+        if (receiptPreviewCache[id]) return false;
+        const status = receiptMetadata.status.get(id);
+        const storageKey = receiptMetadata.storage.get(id);
+        return status === "COMPLETED" && Boolean(storageKey);
+      });
+
+    if (pending.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const fetchPreviews = async () => {
+      for (const receiptId of pending) {
+        try {
+          const { url } = await api.get<{ url: string }>(
+            `/trips/${tripId}/receipts/${receiptId}`
+          );
+          if (!url) continue;
+          const receipt = receipts.find((item) => item.receiptId === receiptId);
+          if (!receipt) continue;
+          if (cancelled) return;
+          setReceiptPreviewCache((current) => {
+            if (current[receiptId]) return current;
+            return {
+              ...current,
+              [receiptId]: {
+                url,
+                title: receipt.fileName ?? "Receipt",
+                type: inferPreviewType(receipt.fileName)
+              }
+            };
+          });
+        } catch {
+          // Ignore failures here; user can still open on demand.
+        }
+      }
+    };
+
+    void fetchPreviews();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [expenses, receiptMetadata, receipts, receiptPreviewCache, tripId]);
+
+  const receiptsByStatus = useMemo(
+    () =>
+      [...receipts].sort((a, b) => {
+        const statusWeight = (status: string) =>
+          status === "COMPLETED" ? 0 : status === "PROCESSING" ? 1 : 2;
+        const weight = statusWeight(a.status) - statusWeight(b.status);
+        if (weight !== 0) return weight;
+        return a.fileName.localeCompare(b.fileName);
+      }),
+    [receipts]
+  );
+
+  const sharedLabel = (count: number) =>
+    `Shared with ${count} ${count === 1 ? "person" : "people"}`;
+
+  const resetFilters = () => {
+    setMemberFilter("all");
+    setCategoryFilter("all");
+    setDateFrom("");
+    setDateTo("");
+  };
+
+  const sortedTotals = useMemo(
+    () => perMemberTotals.slice().sort((a, b) => Math.abs(b.net) - Math.abs(a.net)),
+    [perMemberTotals]
+  );
+
+  const inferPreviewType = (fileName?: string) => {
+    if (!fileName) return null;
+    const lower = fileName.toLowerCase();
+    if (lower.endsWith(".pdf")) return "application/pdf";
+    if (/(\.png|\.jpg|\.jpeg|\.gif|\.webp|\.bmp)$/.test(lower)) {
+      return "image";
+    }
+    return null;
+  };
+
+  const handleViewReceipt = async (receiptId: string) => {
+    setViewReceiptError(null);
+
+    if (receiptPreviewCache[receiptId]) {
+      setExpandedReceiptId(receiptId);
+      return;
+    }
+
+    setViewingReceiptId(receiptId);
+    try {
+      const status = receiptMetadata.status.get(receiptId);
+      const storageKey = receiptMetadata.storage.get(receiptId);
+      if (!storageKey) {
+        setExpandedReceiptId((current) =>
+          current === receiptId ? null : current
+        );
+        setViewReceiptError("Receipt is not available yet");
+        return;
+      }
+      if (status === "FAILED") {
+        setExpandedReceiptId((current) =>
+          current === receiptId ? null : current
+        );
+        setViewReceiptError("Receipt processing failed");
+        return;
+      }
+      const response = await api.get<{ url: string }>(
+        `/trips/${tripId}/receipts/${receiptId}`
+      );
+      const url = response.url;
+      if (url) {
+        const receipt = receipts.find((item) => item.receiptId === receiptId);
+        const preview = {
+          url,
+          title: receipt?.fileName ?? "Receipt",
+          type: inferPreviewType(receipt?.fileName)
+        };
+        setReceiptPreviewCache((current) => ({
+          ...current,
+          [receiptId]: preview
+        }));
+        setExpandedReceiptId(receiptId);
+      } else {
+        setExpandedReceiptId((current) =>
+          current === receiptId ? null : current
+        );
+        setViewReceiptError("No receipt preview available");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to open receipt";
+      setExpandedReceiptId((current) =>
+        current === receiptId ? null : current
+      );
+      setViewReceiptError(message);
+    } finally {
+      setViewingReceiptId(null);
+    }
+  };
+
+  return (
+    <div className="grid-two">
+      <section className="card">
+        <div className="section-title">
+          <h2>Log Expense</h2>
+        </div>
+        <AddExpenseForm
+          tripId={tripId}
+          members={members}
+          currency={currency}
+          receipts={receipts}
+          isSubmitting={isCreating}
+          onSubmit={onCreateExpense}
+          currentUserId={currentUserId}
+        />
+      </section>
+
+      <section className="card" style={{ gridColumn: "1 / -1" }}>
+        <div className="section-title">
+          <h2>Expense History</h2>
+          <span className="muted">{expenses.length} recorded</span>
+        </div>
+        {expenses.length === 0 ? (
+          <p className="muted">No expenses yet.</p>
+        ) : (
+          <div className="list" style={{ gap: "1.5rem" }}>
+            <div
+              className="card"
+              style={{
+                padding: "1rem 1.5rem",
+                borderRadius: "0.9rem",
+                border: "1px solid rgba(148,163,184,0.12)",
+                background: "rgba(15,23,42,0.4)",
+                backdropFilter: "blur(12px)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.9rem"
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "0.75rem"
+                }}
+              >
+                <div className="input-group" style={{ minWidth: "160px" }}>
+                  <label>Person</label>
+                  <select value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}>
+                    <option value="all">All</option>
+                    {members.map((member) => (
+                      <option key={member.memberId} value={member.memberId}>
+                        {membersById[member.memberId] ?? member.memberId}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="input-group" style={{ minWidth: "160px" }}>
+                  <label>Category</label>
+                  <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+                    <option value="all">All</option>
+                    {categories.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="input-group" style={{ minWidth: "140px" }}>
+                  <label>From</label>
+                  <input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+                </div>
+                <div className="input-group" style={{ minWidth: "140px" }}>
+                  <label>To</label>
+                  <input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="secondary"
+                    style={{ opacity: 0.6 }}
+                    onClick={resetFilters}
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span className="muted" style={{ fontSize: "0.9rem" }}>
+                  Showing {filteredExpenses.length} of {expenses.length} expenses
+                </span>
+                <strong>{formatCurrency.format(filteredTotal)}</strong>
+              </div>
+            </div>
+            {viewReceiptError && (
+              <p style={{ color: "#f87171" }}>{viewReceiptError}</p>
+            )}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+                gap: "1.5rem",
+                alignItems: "start"
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                {filteredExpenses.length === 0 ? (
+                  <p className="muted">No expenses match the current filters.</p>
+                ) : (
+                  filteredExpenses.map((expense) => {
+                    const badges: string[] = [];
+                    if (typeof expense.tax === "number" && expense.tax > 0) {
+                      badges.push(`Tax ${formatCurrency.format(expense.tax)}`);
+                    }
+                    if (typeof expense.tip === "number" && expense.tip > 0) {
+                      badges.push(`Tip ${formatCurrency.format(expense.tip)}`);
+                    }
+                    const previewData = expense.receiptId
+                      ? receiptPreviewCache[expense.receiptId]
+                      : undefined;
+                    const isLoadingPreview =
+                      viewingReceiptId === expense.receiptId;
+
+                    return (
+                      <div
+                        key={expense.expenseId}
+                        className="card"
+                        style={{
+                          padding: "1.35rem 1.6rem",
+                          borderRadius: "1.1rem",
+                          border: "1px solid rgba(148,163,184,0.12)",
+                          background: "rgba(15,23,42,0.65)",
+                          boxShadow: "0 25px 45px -35px rgba(15,15,35,0.75)",
+                          backdropFilter: "blur(10px)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "1rem"
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: "1rem",
+                            flexWrap: "wrap"
+                          }}
+                        >
+                          <div>
+                            <h3 style={{ margin: 0, fontSize: "1.15rem", fontWeight: 600 }}>
+                              {expense.description}
+                            </h3>
+                            <p className="muted" style={{ marginTop: "0.45rem" }}>
+                              {formatDate(expense.createdAt)} · Paid by {membersById[expense.paidByMemberId] ?? expense.paidByMemberId}
+                            </p>
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            <span style={{ fontSize: "1.45rem", fontWeight: 700 }}>
+                              {formatCurrency.format(expense.total)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {(expense.vendor || expense.category || badges.length > 0) && (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexWrap: "wrap",
+                              gap: "0.5rem"
+                            }}
+                          >
+                            {expense.vendor && (
+                              <span className="pill" style={{ background: "rgba(59,130,246,0.14)", color: "#bfdbfe" }}>
+                                Vendor • {expense.vendor}
+                              </span>
+                            )}
+                            {expense.category && (
+                              <span className="pill" style={{ background: "rgba(236,72,153,0.14)", color: "#f9a8d4" }}>
+                                Category • {expense.category}
+                              </span>
+                            )}
+                            {badges.map((badge) => (
+                              <span key={badge} className="pill" style={{ background: "rgba(148,163,184,0.14)", color: "#e2e8f0" }}>
+                                {badge}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div
+                          style={{
+                            display: "flex",
+                            flexWrap: "wrap",
+                            gap: "0.6rem"
+                          }}
+                        >
+                          {expense.allocations.map((allocation) => (
+                            <div
+                              key={allocation.memberId}
+                              className="pill"
+                              style={{
+                                background: "rgba(71,85,105,0.35)",
+                                color: "#f1f5f9",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "0.45rem",
+                                padding: "0.35rem 0.65rem"
+                              }}
+                            >
+                              <span>{membersById[allocation.memberId] ?? allocation.memberId}</span>
+                              <span style={{ fontWeight: 600 }}>{formatCurrency.format(allocation.amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            borderTop: "1px solid rgba(148,163,184,0.12)",
+                            paddingTop: "0.8rem"
+                          }}
+                        >
+                          <span className="muted" style={{ fontSize: "0.85rem" }}>
+                            {sharedLabel(expense.sharedWithMemberIds.length)}
+                          </span>
+                          <div style={{ display: "flex", gap: "0.5rem" }}>
+                            {expense.receiptId && (
+                              <button
+                                className="secondary"
+                                style={{ paddingInline: "0.65rem", fontSize: "0.85rem" }}
+                                disabled={
+                                  viewingReceiptId === expense.receiptId ||
+                                  receiptMetadata.status.get(expense.receiptId) === "FAILED" ||
+                                  (!previewData &&
+                                    (receiptMetadata.status.get(expense.receiptId) !== "COMPLETED" ||
+                                      !receiptMetadata.storage.get(expense.receiptId)))
+                                }
+                                onClick={() => {
+                                  if (!expense.receiptId) return;
+                                  if (previewData) {
+                                    window.open(previewData.url, "_blank", "noopener");
+                                    return;
+                                  }
+                                  void handleViewReceipt(expense.receiptId);
+                                }}
+                              >
+                                {previewData
+                                  ? "Open full size"
+                                  : isLoadingPreview
+                                  ? "Loading…"
+                                  : receiptMetadata.status.get(expense.receiptId) === "FAILED"
+                                  ? "Unavailable"
+                                  : "Load preview"}
+                              </button>
+                            )}
+                            <button
+                              className="secondary"
+                              style={{
+                                paddingInline: "0.65rem",
+                                opacity: 0.5,
+                                fontSize: "0.85rem"
+                              }}
+                              disabled={
+                                deletePending && deletingExpenseId === expense.expenseId
+                              }
+                              onClick={() => {
+                                if (
+                                  !window.confirm(
+                                    `Delete expense "${expense.description}"? This cannot be undone.`
+                                  )
+                                ) {
+                                  return;
+                                }
+                                onDeleteExpense(expense.expenseId).catch(() => {});
+                              }}
+                            >
+                              Remove permanently
+                            </button>
+                          </div>
+                        </div>
+                        {(expense.receiptId && (previewData || isLoadingPreview)) && (
+                          <div
+                            style={{
+                              marginTop: "0.85rem",
+                              border: "1px solid rgba(148,163,184,0.14)",
+                              borderRadius: "0.9rem",
+                              padding: "0.75rem",
+                              background: "rgba(15,23,42,0.45)",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "0.75rem"
+                            }}
+                          >
+                            {previewData ? (
+                              previewData.type === "application/pdf" ? (
+                                <iframe
+                                  title={previewData.title}
+                                  src={previewData.url}
+                                  style={{
+                                    border: "none",
+                                    width: "100%",
+                                    height: "260px",
+                                    borderRadius: "0.65rem"
+                                  }}
+                                />
+                              ) : previewData.type === "image" ? (
+                                <img
+                                  src={previewData.url}
+                                  alt={previewData.title}
+                                  style={{
+                                    maxWidth: "100%",
+                                    maxHeight: "340px",
+                                    display: "block",
+                                    borderRadius: "0.65rem"
+                                  }}
+                                />
+                              ) : (
+                                <a
+                                  className="secondary"
+                                  href={previewData.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ alignSelf: "flex-start" }}
+                                >
+                                  Open receipt in new tab
+                                </a>
+                              )
+                            ) : (
+                              <p className="muted" style={{ margin: 0 }}>
+                                Loading preview…
+                              </p>
+                            )}
+                            {previewData && (
+                              <span className="muted" style={{ fontSize: "0.8rem" }}>
+                                {previewData.title}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                );
+              })
+            )}
+              </div>
+
+              <aside
+                className="card"
+                style={{
+                  padding: "1.1rem 1.3rem",
+                  borderRadius: "1rem",
+                  border: "1px solid rgba(148,163,184,0.12)",
+                  background: "rgba(15,23,42,0.45)",
+                  backdropFilter: "blur(10px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1.1rem"
+                }}
+              >
+                <div>
+                  <h3 style={{ margin: 0 }}>Member totals</h3>
+                  <p className="muted" style={{ marginTop: "0.35rem", fontSize: "0.85rem" }}>
+                    Based on filtered expenses
+                  </p>
+                  <div className="list" style={{ marginTop: "0.75rem", gap: "0.55rem" }}>
+                    {sortedTotals.map((member) => {
+                      const tone = member.net >= 0 ? "#4ade80" : "#f87171";
+                      return (
+                        <div
+                          key={member.memberId}
+                          className="card"
+                          style={{
+                            padding: "0.65rem 0.75rem",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            background: "rgba(15,23,42,0.55)",
+                            borderRadius: "0.75rem",
+                            border: "1px solid rgba(148,163,184,0.08)"
+                          }}
+                        >
+                          <div style={{ display: "flex", flexDirection: "column" }}>
+                            <span style={{ fontWeight: 600 }}>{member.name}</span>
+                            <span className="muted" style={{ fontSize: "0.8rem" }}>
+                              Paid {formatCurrency.format(member.paid)} · Share {formatCurrency.format(member.share)}
+                            </span>
+                          </div>
+                          <span style={{ fontWeight: 700, color: tone }}>
+                            {member.net >= 0 ? "Owed" : "Owes"} {formatCurrency.format(Math.abs(member.net))}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {suggestions.length > 0 && (
+                  <div>
+                    <h3 style={{ margin: 0 }}>Suggested settlements</h3>
+                    <div className="list" style={{ marginTop: "0.75rem", gap: "0.5rem" }}>
+                      {suggestions.map((suggestion, index) => (
+                        <div
+                          key={`${suggestion.from}-${suggestion.to}-${index}`}
+                          className="card"
+                          style={{
+                            padding: "0.6rem 0.7rem",
+                            background: "rgba(30,41,59,0.75)",
+                            borderRadius: "0.65rem",
+                            border: "1px solid rgba(148,163,184,0.08)"
+                          }}
+                        >
+                          <p style={{ margin: 0, fontSize: "0.85rem" }}>
+                            <strong>{membersById[suggestion.from] ?? suggestion.from}</strong> should pay {" "}
+                            <strong>{formatCurrency.format(suggestion.amount)}</strong> to {" "}
+                            <strong>{membersById[suggestion.to] ?? suggestion.to}</strong>
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <h3 style={{ margin: 0 }}>Receipts</h3>
+                  <p className="muted" style={{ marginTop: "0.35rem", fontSize: "0.85rem" }}>
+                    {receipts.length === 0
+                      ? "No receipts uploaded yet."
+                      : "Track uploaded receipts and their status."}
+                  </p>
+                  {receipts.length > 0 && (
+                    <div className="list" style={{ marginTop: "0.75rem", gap: "0.55rem" }}>
+                      {receiptsByStatus.map((receipt) => {
+                        const attachedTo = receiptMetadata.usage.get(receipt.receiptId);
+                        const statusTone =
+                          receipt.status === "COMPLETED"
+                            ? "#4ade80"
+                            : receipt.status === "PROCESSING"
+                            ? "#facc15"
+                            : "#f87171";
+                        const receiptPreview = receiptPreviewCache[receipt.receiptId];
+                        const isExpanded = expandedReceiptId === receipt.receiptId;
+                        return (
+                          <div
+                            key={receipt.receiptId}
+                            className="card"
+                            style={{
+                              padding: "0.65rem 0.75rem",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "0.65rem",
+                              background: "rgba(15,23,42,0.55)",
+                              borderRadius: "0.75rem",
+                              border: "1px solid rgba(148,163,184,0.08)"
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                gap: "0.75rem"
+                              }}
+                            >
+                              <div style={{ display: "flex", flexDirection: "column" }}>
+                                <span style={{ fontWeight: 600 }}>{receipt.fileName}</span>
+                                <span className="muted" style={{ fontSize: "0.8rem", color: statusTone }}>
+                                  {receipt.status.toLowerCase()}
+                                </span>
+                                {attachedTo && (
+                                  <span className="muted" style={{ fontSize: "0.8rem" }}>
+                                    Attached to: {attachedTo}
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                className="secondary"
+                                style={{ paddingInline: "0.65rem", fontSize: "0.85rem" }}
+                                disabled={
+                                  viewingReceiptId === receipt.receiptId ||
+                                  receipt.status !== "COMPLETED" ||
+                                  !receipt.storageKey
+                                }
+                                onClick={() => {
+                                  if (isExpanded) {
+                                    setExpandedReceiptId(null);
+                                    return;
+                                  }
+                                  if (receiptPreviewCache[receipt.receiptId]) {
+                                    setExpandedReceiptId(receipt.receiptId);
+                                    return;
+                                  }
+                                  void handleViewReceipt(receipt.receiptId);
+                                }}
+                              >
+                                {isExpanded
+                                  ? "Hide preview"
+                                  : viewingReceiptId === receipt.receiptId
+                                  ? "Opening…"
+                                  : receipt.status === "FAILED"
+                                  ? "Unavailable"
+                                  : receiptPreviewCache[receipt.receiptId]
+                                  ? "Show preview"
+                                  : "View receipt"}
+                              </button>
+                            </div>
+                            {isExpanded && (
+                              <div
+                                style={{
+                                  border: "1px solid rgba(148,163,184,0.14)",
+                                  borderRadius: "0.65rem",
+                                  padding: "0.6rem",
+                                  background: "rgba(15,23,42,0.45)"
+                                }}
+                              >
+                                {receiptPreview ? (
+                                  receiptPreview.type === "application/pdf" ? (
+                                    <iframe
+                                      title={receiptPreview.title}
+                                      src={receiptPreview.url}
+                                      style={{
+                                        border: "none",
+                                        width: "100%",
+                                        height: "220px",
+                                        borderRadius: "0.5rem"
+                                      }}
+                                    />
+                                  ) : receiptPreview.type === "image" ? (
+                                    <img
+                                      src={receiptPreview.url}
+                                      alt={receiptPreview.title}
+                                      style={{
+                                        maxWidth: "100%",
+                                        maxHeight: "280px",
+                                        display: "block",
+                                        borderRadius: "0.5rem"
+                                      }}
+                                    />
+                                  ) : (
+                                    <a
+                                      className="secondary"
+                                      href={receiptPreview.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                    >
+                                      Open receipt in new tab
+                                    </a>
+                                  )
+                                ) : (
+                                  <p className="muted" style={{ margin: 0 }}>
+                                    Loading preview…
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+};
+
+interface SettlementsTabProps {
+  currency: string;
+  members: TripSummary["members"];
+  settlements: TripSummary["settlements"];
+  pendingSettlements: TripSummary["settlements"];
+  onRecord: (payload: {
+    fromMemberId: string;
+    toMemberId: string;
+    amount: number;
+    note?: string;
+  }) => Promise<void>;
+  isRecording: boolean;
+  onConfirm: (settlementId: string, confirmed: boolean) => void;
+  confirmPending: boolean;
+  membersById: Record<string, string>;
+  onDelete: (settlementId: string) => Promise<void>;
+  deletePending: boolean;
+  deletingSettlementId?: string;
+  currentUserId?: string;
+}
+
+const SettlementsTab = ({
+  currency,
+  members,
+  settlements,
+  pendingSettlements,
+  onRecord,
+  isRecording,
+  onConfirm,
+  confirmPending,
+  membersById,
+  onDelete,
+  deletePending,
+  deletingSettlementId,
+  currentUserId
+}: SettlementsTabProps) => (
+  <div className="grid-two">
+    <section className="card">
+      <div className="section-title">
+        <h2>Record Settlement</h2>
+      </div>
+      <SettlementForm
+        members={members}
+        currency={currency}
+        isSubmitting={isRecording}
+        onSubmit={onRecord}
+        currentUserId={currentUserId}
+      />
+    </section>
+
+    <section className="card" style={{ gridColumn: "1 / -1" }}>
+      <div className="section-title">
+        <h2>Settlement History</h2>
+        <span className="muted">{settlements.length} recorded</span>
+      </div>
+      {settlements.length === 0 ? (
+        <p className="muted">No settlements recorded yet.</p>
+      ) : (
+        <div className="list">
+          {settlements.map((settlement) => {
+            const from = membersById[settlement.fromMemberId] ?? settlement.fromMemberId;
+            const to = membersById[settlement.toMemberId] ?? settlement.toMemberId;
+            return (
+              <div key={settlement.settlementId} className="card" style={{ padding: "1rem 1.25rem" }}>
+                <p style={{ margin: "0 0 0.25rem" }}>
+                  <strong>{from}</strong> paid <strong>{to}</strong>
+                </p>
+                <p className="muted" style={{ margin: 0 }}>
+                  {settlement.amount.toFixed(2)} {settlement.currency}
+                </p>
+                {settlement.note && (
+                  <p className="muted" style={{ margin: "0.4rem 0 0" }}>
+                    {settlement.note}
+                  </p>
+                )}
+                <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <span className="pill">
+                    Status: {settlement.confirmedAt ? "confirmed" : "pending"}
+                  </span>
+                  {!settlement.confirmedAt && (
+                    <button
+                      className="secondary"
+                      disabled={confirmPending}
+                      onClick={() => onConfirm(settlement.settlementId, true)}
+                    >
+                      Mark as paid
+                    </button>
+                  )}
+                  <button
+                    className="secondary"
+                    disabled={
+                      deletePending &&
+                      deletingSettlementId === settlement.settlementId
+                    }
+                    onClick={() => {
+                      if (
+                        !window.confirm(
+                          `Delete settlement from ${from} to ${to}?`
+                        )
+                      ) {
+                        return;
+                      }
+                      onDelete(settlement.settlementId).catch(() => {});
+                    }}
+                  >
+                    Delete settlement
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {pendingSettlements.length > 0 && (
+        <p className="muted" style={{ marginTop: "1rem" }}>
+          Pending settlements will reduce balances once confirmed.
+        </p>
+      )}
+    </section>
+  </div>
+);
+
+interface PeopleTabProps {
+  members: TripSummary["members"];
+  memberSearchTerm: string;
+  onMemberSearchTermChange: (value: string) => void;
+  searchResults: UserProfile[];
+  searchMessage: string | null;
+  feedbackMessage: string | null;
+  onAddMember: (userId: string) => void;
+  addLoading: boolean;
+  canManageMembers: boolean;
+  ownerId: string;
+  onRemoveMember: (memberId: string) => Promise<void>;
+  removeLoading: boolean;
+  removingMemberId?: string;
+  currentUserId?: string;
+  membersById: Record<string, string>;
+}
+
+const PeopleTab = ({
+  members,
+  memberSearchTerm,
+  onMemberSearchTermChange,
+  searchResults,
+  searchMessage,
+  feedbackMessage,
+  onAddMember,
+  addLoading,
+  canManageMembers,
+  ownerId,
+  onRemoveMember,
+  removeLoading,
+  removingMemberId,
+  currentUserId,
+  membersById
+}: PeopleTabProps) => (
+  <div className="grid-two">
+    <section className="card">
+      <div className="section-title">
+        <h2>People</h2>
+      </div>
+      <div className="list">
+        <div className="input-group">
+          <label htmlFor="member-search">Find people</label>
+          <input
+            id="member-search"
+            value={memberSearchTerm}
+            onChange={(event) => onMemberSearchTermChange(event.target.value)}
+            placeholder="Search by name or email"
+          />
+        </div>
+        {searchMessage && <p className="muted">{searchMessage}</p>}
+        {feedbackMessage && (
+          <p
+            style={{
+              color: /fail|cannot|error/i.test(feedbackMessage)
+                ? "#f87171"
+                : "#4ade80"
+            }}
+          >
+            {feedbackMessage}
+          </p>
+        )}
+        {searchResults.length > 0 && (
+          <div className="list">
+            {searchResults.map((user) => {
+              const alreadyMember = members.some((member) => member.memberId === user.userId);
+              const label = `${user.displayName ?? user.email ?? user.userId}${user.userId === currentUserId ? " (you)" : ""}`;
+              return (
+                <div
+                  key={user.userId}
+                  className="card"
+                  style={{ padding: "0.75rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                >
+                  <div>
+                    <strong>{label}</strong>
+                    {user.email && (
+                      <p className="muted" style={{ margin: "0.2rem 0 0" }}>
+                        {user.email}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    className="secondary"
+                    disabled={addLoading || alreadyMember}
+                    onClick={() => onAddMember(user.userId)}
+                  >
+                    {alreadyMember ? "Already added" : "Add"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </section>
+
+    <section className="card">
+      <div className="section-title">
+        <h2>Trip Members</h2>
+        <span className="muted">{members.length}</span>
+      </div>
+      <div className="list">
+        {members.map((member) => {
+          const canRemove =
+            canManageMembers && member.memberId !== ownerId;
+          const label = membersById[member.memberId] ?? member.displayName ?? member.email ?? member.memberId;
+          return (
+            <div
+              key={member.memberId}
+              className="card"
+              style={{
+                padding: "0.75rem 1rem",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "1rem"
+              }}
+            >
+              <div>
+                <strong>{label}</strong>
+                {member.email && (
+                  <p className="muted" style={{ margin: "0.2rem 0 0" }}>
+                    {member.email}
+                  </p>
+                )}
+              </div>
+              {canRemove && (
+                <button
+                  className="secondary"
+                  disabled={
+                    removeLoading && removingMemberId === member.memberId
+                  }
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        `Remove ${label} from this trip?`
+                      )
+                    ) {
+                      return;
+                    }
+                    onRemoveMember(member.memberId).catch(() => {});
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  </div>
+);
+
+export default TripDetailPage;
