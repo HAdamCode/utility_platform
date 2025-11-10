@@ -133,10 +133,17 @@ export class GroupExpensesStack extends Stack {
       preventUserExistenceErrors: true
     });
 
-    const hostedFrontendDomain =
-      process.env.FRONTEND_DOMAIN ?? "https://main.d2tiu08u9zzp7o.amplifyapp.com";
+    const defaultFrontendDomains = [
+      "https://thestackcore.com",
+      "https://www.thestackcore.com"
+    ];
+    const configuredDomains =
+      process.env.FRONTEND_DOMAINS?.split(",")
+        .map((domain) => domain.trim())
+        .filter(Boolean) ??
+      (process.env.FRONTEND_DOMAIN ? [process.env.FRONTEND_DOMAIN] : []);
     const allowedOrigins = Array.from(
-      new Set(["http://localhost:5173", hostedFrontendDomain].filter(Boolean))
+      new Set(["http://localhost:5173", ...defaultFrontendDomains, ...configuredDomains].filter(Boolean))
     );
 
     const sharedEnvironment = {

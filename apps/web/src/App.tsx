@@ -28,8 +28,8 @@ const App = () => {
             <div className="auth-hero">
               <WorkspaceBadgeIcon className="auth-hero-icon" />
               <div>
-                <h2>Utility Workspace</h2>
-                <p>Single sign-on for every tool in the suite.</p>
+                <h2>The Stack Core</h2>
+                <p>Single sign-on for every tool in your stack.</p>
               </div>
             </div>
           );
@@ -89,7 +89,7 @@ const App = () => {
               <main className="app-container">
                 <header className="app-header">
                   <div style={{ flex: 1 }}>
-                    <h1>Personal Utility Platform</h1>
+                    <h1>The Stack Core</h1>
                     <p>Hi {displayName}</p>
                     <nav className="module-nav">
                       <NavLink
