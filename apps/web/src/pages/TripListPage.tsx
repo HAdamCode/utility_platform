@@ -8,14 +8,12 @@ interface FormState {
   name: string;
   startDate?: string;
   endDate?: string;
-  currency: string;
 }
 
 const defaultFormState: FormState = {
   name: "",
   startDate: "",
-  endDate: "",
-  currency: "USD"
+  endDate: ""
 };
 
 const TripListPage = () => {
@@ -59,7 +57,7 @@ const TripListPage = () => {
     onSuccess: (data) => {
       setSearchResults(data.users);
       setSearchMessage(
-        data.users.length ? null : "No singers found with that email prefix"
+        data.users.length ? null : "No people found with that email prefix"
       );
     },
     onError: (err: unknown) => {
@@ -92,7 +90,7 @@ const TripListPage = () => {
       name: form.name.trim(),
       startDate: form.startDate || undefined,
       endDate: form.endDate || undefined,
-      currency: form.currency,
+      currency: "USD",
       members: selectedMembers.map((member) => ({ userId: member.userId }))
     });
   };
@@ -174,22 +172,7 @@ const TripListPage = () => {
           </div>
 
           <div className="input-group">
-            <label htmlFor="trip-currency">Currency</label>
-            <select
-              id="trip-currency"
-              value={form.currency}
-              onChange={(event) => setForm((prev) => ({ ...prev, currency: event.target.value }))}
-            >
-              <option value="USD">USD</option>
-              <option value="EUR">EUR</option>
-              <option value="GBP">GBP</option>
-              <option value="CAD">CAD</option>
-              <option value="AUD">AUD</option>
-            </select>
-          </div>
-
-          <div className="input-group">
-            <label>Invite singers (optional)</label>
+            <label>Invite people (optional)</label>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input
                 value={searchTerm}
@@ -238,7 +221,7 @@ const TripListPage = () => {
             {selectedMembers.length > 0 && (
               <div className="list">
                 <p className="muted" style={{ marginBottom: 0 }}>
-                  Selected singers
+                  Selected people
                 </p>
                 {selectedMembers.map((member) => (
                   <div
