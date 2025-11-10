@@ -245,6 +245,20 @@ button.secondary:hover {
   color: #94a3b8;
 }
 
+.input-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.input-row > * {
+  flex: 1 1 150px;
+}
+
+.input-row button {
+  flex: 0 0 auto;
+}
+
 .auth-hero {
   display: flex;
   align-items: center;
@@ -303,4 +317,49 @@ button.secondary:hover {
 .module-icon svg {
   width: 32px;
   height: 32px;
+}
+
+@media (max-width: 720px) {
+  .app-container {
+    padding: 1.5rem 1rem 3rem;
+  }
+
+  .app-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .module-nav {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 0.25rem;
+  }
+
+  .module-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .module-link {
+    white-space: nowrap;
+  }
+
+  .grid-two {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    padding: 1.25rem;
+  }
+
+  .section-title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
 }

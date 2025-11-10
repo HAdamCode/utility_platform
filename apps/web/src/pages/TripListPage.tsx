@@ -157,7 +157,7 @@ const TripListPage = () => {
 
           <div className="input-group">
             <label>Dates (optional)</label>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div className="input-row">
               <input
                 type="date"
                 value={form.startDate}
@@ -173,7 +173,7 @@ const TripListPage = () => {
 
           <div className="input-group">
             <label>Invite people (optional)</label>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div className="input-row">
               <input
                 value={searchTerm}
                 onChange={(event) => setSearchTerm(event.target.value)}
