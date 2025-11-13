@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthenticator } from "@aws-amplify/ui-react";
@@ -10,10 +10,28 @@ import type {
   Expense,
   Settlement,
   UserProfile,
-  BalanceRow
+  BalanceRow,
+  Trip
 } from "../types";
 
 type TripTab = "overview" | "expenses" | "settlements" | "people";
+
+type TripDetailsFormState = {
+  name: string;
+  startDate: string;
+  endDate: string;
+};
+
+type DetailsMessage = {
+  type: "success" | "error";
+  text: string;
+};
+
+type TripUpdateInput = {
+  name?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+};
 
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debouncedValue, setDebouncedValue] = useState(value);
@@ -101,20 +119,79 @@ const TripDetailPage = () => {
   const [activeTab, setActiveTab] = useState<TripTab>("overview");
   const [memberSearchTerm, setMemberSearchTerm] = useState("");
   const [memberFeedback, setMemberFeedback] = useState<string | null>(null);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [detailsForm, setDetailsForm] = useState<TripDetailsFormState>({
+    name: "",
+    startDate: "",
+    endDate: ""
+  });
+  const [detailsMessage, setDetailsMessage] = useState<DetailsMessage | null>(null);
 
   const queryKey = useMemo(() => ["trip", tripId], [tripId]);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey,
     queryFn: () => api.get<TripSummary>(`/trips/${tripId}`),
     enabled: Boolean(tripId)
   });
+
+  const syncDetailsFormFromTrip = useCallback(() => {
+    if (!data?.trip) return;
+    setDetailsForm({
+      name: data.trip.name ?? "",
+      startDate: data.trip.startDate ?? "",
+      endDate: data.trip.endDate ?? ""
+    });
+  }, [data?.trip?.name, data?.trip?.startDate, data?.trip?.endDate]);
+
+  useEffect(() => {
+    syncDetailsFormFromTrip();
+  }, [syncDetailsFormFromTrip]);
+
+  const handleTabChange = useCallback(
+    (tab: TripTab) => {
+      setActiveTab(tab);
+      if (tripId) {
+        refetch();
+      }
+    },
+    [refetch, tripId]
+  );
 
   const createExpenseMutation = useMutation({
     mutationFn: (payload: CreateExpenseInput) =>
       api.post<Expense>(`/trips/${tripId}/expenses`, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
+    }
+  });
+
+  const updateTripMutation = useMutation({
+    mutationFn: (payload: TripUpdateInput) => {
+      if (!tripId) {
+        throw new Error("Trip not found");
+      }
+      return api.patch<Trip>(`/trips/${tripId}`, payload);
+    },
+    onSuccess: (updatedTrip) => {
+      queryClient.invalidateQueries({ queryKey });
+      setDetailsMessage({ type: "success", text: "Group details updated" });
+      setIsEditingDetails(false);
+      setDetailsForm({
+        name: updatedTrip.name,
+        startDate: updatedTrip.startDate ?? "",
+        endDate: updatedTrip.endDate ?? ""
+      });
+    },
+    onError: (err: unknown) => {
+      if (err instanceof ApiError) {
+        setDetailsMessage({ type: "error", text: err.message });
+      } else {
+        setDetailsMessage({
+          type: "error",
+          text: "Failed to update group details"
+        });
+      }
     }
   });
 
@@ -175,7 +252,7 @@ const TripDetailPage = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
-      setMemberFeedback("Member added to trip");
+      setMemberFeedback("Member added to group");
     },
     onError: (err: unknown) => {
       if (err instanceof ApiError) {
@@ -198,7 +275,7 @@ const TripDetailPage = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
-      setMemberFeedback("Member removed from trip");
+      setMemberFeedback("Member removed from group");
     },
     onError: (err: unknown) => {
       if (err instanceof ApiError) {
@@ -267,16 +344,43 @@ const TripDetailPage = () => {
     [data?.balances]
   );
 
+  const handleStartEditingDetails = () => {
+    syncDetailsFormFromTrip();
+    setDetailsMessage(null);
+    setIsEditingDetails(true);
+  };
+
+  const handleCancelDetailsEdit = () => {
+    syncDetailsFormFromTrip();
+    setDetailsMessage(null);
+    setIsEditingDetails(false);
+  };
+
+  const handleDetailsSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    setDetailsMessage(null);
+    if (!detailsForm.name.trim()) {
+      setDetailsMessage({ type: "error", text: "Group name is required" });
+      return;
+    }
+
+    updateTripMutation.mutate({
+      name: detailsForm.name.trim(),
+      startDate: detailsForm.startDate ? detailsForm.startDate : null,
+      endDate: detailsForm.endDate ? detailsForm.endDate : null
+    });
+  };
+
   if (!tripId) {
-    return <p className="muted">No trip selected.</p>;
+    return <p className="muted">No group selected.</p>;
   }
 
   if (isLoading) {
-    return <p className="muted">Loading trip details…</p>;
+    return <p className="muted">Loading group details…</p>;
   }
 
   if (error || !data) {
-    return <p className="muted">Unable to load trip. Please try again.</p>;
+    return <p className="muted">Unable to load group. Please try again.</p>;
   }
 
   const { trip, members, expenses, receipts, balances, settlements, pendingSettlements } = data;
@@ -301,14 +405,85 @@ const TripDetailPage = () => {
               {trip.endDate ? ` → ${trip.endDate}` : ""} • {trip.currency}
             </p>
           </div>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => navigate("/group-expenses/trips")}
-          >
-            Back to trips
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            {canManageMembers && !isEditingDetails && (
+              <button type="button" className="secondary" onClick={handleStartEditingDetails}>
+                Edit details
+              </button>
+            )}
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => navigate("/group-expenses/trips")}
+            >
+              Back to groups
+            </button>
+          </div>
         </div>
+        {canManageMembers && isEditingDetails && (
+          <form
+            onSubmit={handleDetailsSubmit}
+            className="list"
+            style={{ marginTop: "1rem" }}
+          >
+            <div className="input-group">
+              <label htmlFor="group-name">Group name</label>
+              <input
+                id="group-name"
+                value={detailsForm.name}
+                onChange={(event) =>
+                  setDetailsForm((prev) => ({ ...prev, name: event.target.value }))
+                }
+                placeholder="Weekend getaway"
+                disabled={updateTripMutation.isPending}
+              />
+            </div>
+            <div className="input-group">
+              <label>Dates (optional)</label>
+              <div className="input-row">
+                <input
+                  type="date"
+                  value={detailsForm.startDate}
+                  onChange={(event) =>
+                    setDetailsForm((prev) => ({ ...prev, startDate: event.target.value }))
+                  }
+                  disabled={updateTripMutation.isPending}
+                />
+                <input
+                  type="date"
+                  value={detailsForm.endDate}
+                  onChange={(event) =>
+                    setDetailsForm((prev) => ({ ...prev, endDate: event.target.value }))
+                  }
+                  disabled={updateTripMutation.isPending}
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button type="submit" className="primary" disabled={updateTripMutation.isPending}>
+                {updateTripMutation.isPending ? "Saving…" : "Save changes"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={handleCancelDetailsEdit}
+                disabled={updateTripMutation.isPending}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
+        {detailsMessage && (
+          <p
+            style={{
+              margin: isEditingDetails ? "0" : "1rem 0 0",
+              color: detailsMessage.type === "error" ? "#f87171" : "#4ade80"
+            }}
+          >
+            {detailsMessage.text}
+          </p>
+        )}
         <div
           className="list"
           style={{ marginTop: "1rem", flexDirection: "row", gap: "0.5rem", flexWrap: "wrap" }}
@@ -323,11 +498,16 @@ const TripDetailPage = () => {
               key={tab.id}
               type="button"
               className={activeTab === tab.id ? "primary" : "secondary"}
-              onClick={() => setActiveTab(tab.id as TripTab)}
+              onClick={() => handleTabChange(tab.id as TripTab)}
             >
               {tab.label}
             </button>
           ))}
+          {isFetching && !isLoading && (
+            <span className="muted" style={{ alignSelf: "center" }}>
+              Refreshing…
+            </span>
+          )}
         </div>
       </section>
 

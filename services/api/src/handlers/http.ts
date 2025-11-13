@@ -88,6 +88,12 @@ export const handler = async (
         return ok(summary, origin);
       }
 
+      if (!remainder && method === "PATCH") {
+        const body = parseBody(event);
+        const trip = await tripService.updateTrip(tripId, body, auth);
+        return ok(trip, origin);
+      }
+
       if (remainder === "/members" && method === "POST") {
         const body = parseBody(event);
         const members = await tripService.addMembers(tripId, body, auth);

@@ -50,6 +50,22 @@ const createTripSchema = z.object({
     .optional()
 });
 
+const updateTripSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    startDate: z.union([z.string().min(1), z.null()]).optional(),
+    endDate: z.union([z.string().min(1), z.null()]).optional()
+  })
+  .refine(
+    (value) =>
+      value.name !== undefined ||
+      value.startDate !== undefined ||
+      value.endDate !== undefined,
+    {
+      message: "No updates provided"
+    }
+  );
+
 const addMembersSchema = z.object({
   members: z
     .array(
@@ -273,6 +289,61 @@ export class TripService {
     }
 
     return trip;
+  }
+
+  async updateTrip(
+    tripId: string,
+    body: unknown,
+    auth: AuthContext
+  ): Promise<Trip> {
+    const parsed = updateTripSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.message);
+    }
+
+    await ensureCurrentUserProfile(auth);
+    const details = await getTripStore().getTripDetails(tripId);
+    const isOwner = details.trip.ownerId === auth.userId;
+    if (!isOwner) {
+      throw new ForbiddenError("Only trip owners can edit details");
+    }
+
+    const updates: {
+      name?: string;
+      startDate?: string | null;
+      endDate?: string | null;
+      updatedAt: string;
+    } = {
+      updatedAt: isoNow()
+    };
+
+    if (parsed.data.name !== undefined) {
+      updates.name = parsed.data.name;
+    }
+    if (parsed.data.startDate !== undefined) {
+      updates.startDate = parsed.data.startDate;
+    }
+    if (parsed.data.endDate !== undefined) {
+      updates.endDate = parsed.data.endDate;
+    }
+
+    await getTripStore().updateTripMetadata(tripId, details.members, updates);
+
+    const nextTrip: Trip = {
+      ...details.trip,
+      ...(updates.name !== undefined ? { name: updates.name } : {}),
+      startDate:
+        updates.startDate !== undefined
+          ? updates.startDate ?? undefined
+          : details.trip.startDate,
+      endDate:
+        updates.endDate !== undefined
+          ? updates.endDate ?? undefined
+          : details.trip.endDate,
+      updatedAt: updates.updatedAt
+    };
+
+    return nextTrip;
   }
 
   async getTripSummary(tripId: string, auth: AuthContext): Promise<TripSummary> {

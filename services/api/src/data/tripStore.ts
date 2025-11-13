@@ -265,6 +265,149 @@ export class TripStore {
     };
   }
 
+  async updateTripMetadata(
+    tripId: string,
+    members: TripMember[],
+    updates: {
+      name?: string;
+      startDate?: string | null;
+      endDate?: string | null;
+      updatedAt: string;
+    }
+  ): Promise<void> {
+    const names: Record<string, string> = {
+      "#updatedAt": "updatedAt"
+    };
+    const values: Record<string, unknown> = {
+      ":updatedAt": updates.updatedAt
+    };
+    const setParts: string[] = ["#updatedAt = :updatedAt"];
+    const removeParts: string[] = [];
+
+    if (updates.name !== undefined) {
+      names["#name"] = "name";
+      values[":name"] = updates.name;
+      setParts.push("#name = :name");
+    }
+
+    if (updates.startDate !== undefined) {
+      names["#startDate"] = "startDate";
+      if (updates.startDate === null) {
+        removeParts.push("#startDate");
+      } else {
+        values[":startDate"] = updates.startDate;
+        setParts.push("#startDate = :startDate");
+      }
+    }
+
+    if (updates.endDate !== undefined) {
+      names["#endDate"] = "endDate";
+      if (updates.endDate === null) {
+        removeParts.push("#endDate");
+      } else {
+        values[":endDate"] = updates.endDate;
+        setParts.push("#endDate = :endDate");
+      }
+    }
+
+    const expressions: string[] = [];
+    if (setParts.length) {
+      expressions.push(`SET ${setParts.join(", ")}`);
+    }
+    if (removeParts.length) {
+      expressions.push(`REMOVE ${removeParts.join(", ")}`);
+    }
+
+    await this.docClient.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: {
+          PK: keys.tripPk(tripId),
+          SK: keys.tripSkMeta
+        },
+        UpdateExpression: expressions.join(" "),
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values
+      })
+    );
+
+    const memberIds = Array.from(
+      new Set(members.map((member) => member.memberId))
+    );
+    await Promise.all(
+      memberIds.map((memberId) =>
+        this.updateMemberTripMetadata(tripId, memberId, updates)
+      )
+    );
+  }
+
+  private async updateMemberTripMetadata(
+    tripId: string,
+    memberId: string,
+    updates: {
+      name?: string;
+      startDate?: string | null;
+      endDate?: string | null;
+      updatedAt: string;
+    }
+  ): Promise<void> {
+    const names: Record<string, string> = {
+      "#tripUpdatedAt": "tripUpdatedAt"
+    };
+    const values: Record<string, unknown> = {
+      ":tripUpdatedAt": updates.updatedAt
+    };
+    const setParts: string[] = ["#tripUpdatedAt = :tripUpdatedAt"];
+    const removeParts: string[] = [];
+
+    if (updates.name !== undefined) {
+      names["#tripName"] = "tripName";
+      values[":tripName"] = updates.name;
+      setParts.push("#tripName = :tripName");
+    }
+
+    if (updates.startDate !== undefined) {
+      names["#tripStartDate"] = "tripStartDate";
+      if (updates.startDate === null) {
+        removeParts.push("#tripStartDate");
+      } else {
+        values[":tripStartDate"] = updates.startDate;
+        setParts.push("#tripStartDate = :tripStartDate");
+      }
+    }
+
+    if (updates.endDate !== undefined) {
+      names["#tripEndDate"] = "tripEndDate";
+      if (updates.endDate === null) {
+        removeParts.push("#tripEndDate");
+      } else {
+        values[":tripEndDate"] = updates.endDate;
+        setParts.push("#tripEndDate = :tripEndDate");
+      }
+    }
+
+    const expressions: string[] = [];
+    if (setParts.length) {
+      expressions.push(`SET ${setParts.join(", ")}`);
+    }
+    if (removeParts.length) {
+      expressions.push(`REMOVE ${removeParts.join(", ")}`);
+    }
+
+    await this.docClient.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: {
+          PK: keys.tripPk(tripId),
+          SK: keys.memberSk(memberId)
+        },
+        UpdateExpression: expressions.join(" "),
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values
+      })
+    );
+  }
+
   async addMembers(
     trip: Trip,
     members: TripMember[]

@@ -47,7 +47,7 @@ const TripListPage = () => {
       if (err instanceof ApiError) {
         setError(err.message);
       } else {
-        setError("Failed to create trip");
+        setError("Failed to create group");
       }
     }
   });
@@ -82,7 +82,7 @@ const TripListPage = () => {
     event.preventDefault();
     setError(null);
     if (!form.name.trim()) {
-      setError("Trip name is required");
+      setError("Group name is required");
       return;
     }
 
@@ -112,13 +112,13 @@ const TripListPage = () => {
     <div className="grid-two">
       <section className="card">
         <div className="section-title">
-          <h2>Your Trips</h2>
+          <h2>Your Groups</h2>
           <span className="muted">{trips.length} active</span>
         </div>
         {isLoading ? (
-          <p className="muted">Loading trips…</p>
+          <p className="muted">Loading groups…</p>
         ) : trips.length === 0 ? (
-          <p className="muted">No trips yet. Create one to get started.</p>
+          <p className="muted">No groups yet. Create one to get started.</p>
         ) : (
           <div className="list">
             {trips.map((trip) => (
@@ -142,11 +142,11 @@ const TripListPage = () => {
 
       <section className="card">
         <div className="section-title">
-          <h2>Create Trip</h2>
+          <h2>Create Group</h2>
         </div>
         <form onSubmit={handleSubmit} className="list">
           <div className="input-group">
-            <label htmlFor="trip-name">Trip name</label>
+            <label htmlFor="trip-name">Group name</label>
             <input
               id="trip-name"
               value={form.name}
@@ -249,7 +249,7 @@ const TripListPage = () => {
           {error && <p style={{ color: "#fda4af" }}>{error}</p>}
 
           <button type="submit" className="primary" disabled={createMutation.isPending}>
-            {createMutation.isPending ? "Creating…" : "Create trip"}
+            {createMutation.isPending ? "Creating…" : "Create group"}
           </button>
         </form>
       </section>
