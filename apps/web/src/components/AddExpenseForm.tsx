@@ -149,6 +149,18 @@ export interface CreateExpenseInput {
   receiptId?: string;
 }
 
+interface AllocationSummaryItem {
+  memberId: string;
+  displayName: string;
+  amount: number;
+}
+
+interface PendingExpenseConfirmation {
+  payload: CreateExpenseInput;
+  payerName: string;
+  allocationSummary: AllocationSummaryItem[];
+}
+
 interface AddExpenseFormProps {
   tripId: string;
   members: TripMember[];
@@ -194,6 +206,7 @@ const AddExpenseForm = ({
   const [splitExtrasEvenly, setSplitExtrasEvenly] = useState(false);
   const [allocations, setAllocations] = useState<Record<string, string>>({});
   const [remainderMemberId, setRemainderMemberId] = useState<string>("");
+  const [showRemainderPrompt, setShowRemainderPrompt] = useState(false);
   const [receiptId, setReceiptId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [receiptStatusMessage, setReceiptStatusMessage] = useState<string | null>(null);
@@ -207,6 +220,10 @@ const AddExpenseForm = ({
   const [receiptPreviewType, setReceiptPreviewType] = useState<string | null>(null);
   const [activeReceiptId, setActiveReceiptId] = useState<string | null>(null);
   const liveReceiptObjectUrlRef = useRef<string | null>(null);
+  const remainderSectionRef = useRef<HTMLDivElement | null>(null);
+  const previousRemainderRef = useRef(0);
+  const lastAcknowledgedRemainderRef = useRef<number | null>(null);
+  const [pendingExpense, setPendingExpense] = useState<PendingExpenseConfirmation | null>(null);
 
   useEffect(() => {
     if (!payerManuallySelected) {
@@ -281,6 +298,14 @@ const AddExpenseForm = ({
     [members, sharedWith]
   );
 
+  const membersById = useMemo(() => {
+    const lookup: Record<string, TripMember> = {};
+    members.forEach((member) => {
+      lookup[member.memberId] = member;
+    });
+    return lookup;
+  }, [members]);
+
   const customAllocationPreview = useMemo(
     () =>
       computeCustomAllocations(
@@ -312,6 +337,29 @@ const AddExpenseForm = ({
     const totalCents = Math.round(Math.abs(grossTotal * 100));
     return totalCents % sharedWith.length;
   }, [splitEvenly, grossTotal, sharedWith]);
+
+  useEffect(() => {
+    const hasRemainder = splitEvenly && evenSplitRemainderCents > 0;
+    if (hasRemainder) {
+      const acknowledged =
+        lastAcknowledgedRemainderRef.current === evenSplitRemainderCents;
+      if (!acknowledged) {
+        if (previousRemainderRef.current === 0 && remainderSectionRef.current) {
+          remainderSectionRef.current.scrollIntoView({
+            behavior: "smooth",
+            block: "center"
+          });
+        }
+        setShowRemainderPrompt(true);
+      }
+    } else {
+      lastAcknowledgedRemainderRef.current = null;
+      if (showRemainderPrompt) {
+        setShowRemainderPrompt(false);
+      }
+    }
+    previousRemainderRef.current = evenSplitRemainderCents;
+  }, [splitEvenly, evenSplitRemainderCents, showRemainderPrompt]);
 
   const allocationStatusMessage = useMemo(() => {
     if (grossTotal <= 0) {
@@ -502,6 +550,12 @@ const AddExpenseForm = ({
     });
   };
 
+  const handleRemainderMemberChange = (memberId: string) => {
+    setRemainderMemberId(memberId);
+    setShowRemainderPrompt(false);
+    lastAcknowledgedRemainderRef.current = evenSplitRemainderCents;
+  };
+
   const handleAllocationChange = (memberId: string, value: string) => {
     setAllocations((current) => ({
       ...current,
@@ -591,7 +645,28 @@ const AddExpenseForm = ({
     }
   };
 
-  const handleSubmit = async (event: FormEvent) => {
+  const resetFormState = () => {
+    setDescription("");
+    setVendor("");
+    setCategory("");
+    setSubtotalInput("");
+    setTaxInput("");
+    setTipInput("");
+    setSplitEvenly(true);
+    setSplitExtrasEvenly(false);
+    setAllocations({});
+    setReceiptId("");
+    setReceiptStatusMessage(null);
+    setParseStatus(null);
+    setParseError(null);
+    setReceiptPreviewError(null);
+    setShowRemainderPrompt(false);
+    lastAcknowledgedRemainderRef.current = null;
+    previousRemainderRef.current = 0;
+    resetReceiptPreview();
+  };
+
+  const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     setError(null);
 
@@ -610,6 +685,16 @@ const AddExpenseForm = ({
     }
     if (grossTotal <= 0) {
       setError("Enter a positive subtotal, tax, or tip before saving.");
+      return;
+    }
+    if (splitEvenly && evenSplitRemainderCents > 0 && !remainderMemberId) {
+      setError(
+        `Assign the leftover ${formatAmount(evenSplitRemainderCents / 100)} before saving.`
+      );
+      remainderSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "center"
+      });
       return;
     }
 
@@ -657,28 +742,50 @@ const AddExpenseForm = ({
       receiptId: receiptId || undefined
     };
 
+    const payerMember = membersById[payload.paidByMemberId];
+    const payerName =
+      payerMember?.displayName ??
+      (payerMember?.email ?? "Selected member");
+    const allocationSummary = allocationsPayload
+      .filter((item) => item.amount > 0.0001)
+      .map((item) => {
+        const member = membersById[item.memberId];
+        return {
+          memberId: item.memberId,
+          displayName:
+            member?.displayName ??
+            member?.email ??
+            item.memberId,
+          amount: item.amount
+        };
+      });
+
+    setPendingExpense({
+      payload,
+      payerName:
+        currentUserId && payerMember?.memberId === currentUserId
+          ? `${payerName} (you)`
+          : payerName,
+      allocationSummary
+    });
+  };
+
+  const handleConfirmSubmit = async () => {
+    if (!pendingExpense) return;
+    setError(null);
     try {
-      await onSubmit(payload);
-      setDescription("");
-      setVendor("");
-      setCategory("");
-      setSubtotalInput("");
-      setTaxInput("");
-      setTipInput("");
-      setSplitEvenly(true);
-      setSplitExtrasEvenly(false);
-      setAllocations({});
-      setReceiptId("");
-      setReceiptStatusMessage(null);
-      setParseStatus(null);
-      setParseError(null);
-      setReceiptPreviewError(null);
-      resetReceiptPreview();
+      await onSubmit(pendingExpense.payload);
+      setPendingExpense(null);
+      resetFormState();
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to save expense";
       setError(message);
     }
+  };
+
+  const handleCancelConfirmation = () => {
+    setPendingExpense(null);
   };
 
   const activeReceipt = useMemo(
@@ -936,15 +1043,60 @@ const AddExpenseForm = ({
         </div>
       </div>
 
+      {showRemainderPrompt && (
+        <div
+          role="alert"
+          style={{
+            background: "rgba(254,243,199,0.2)",
+            border: "1px solid rgba(250, 204, 21, 0.6)",
+            borderRadius: "0.75rem",
+            padding: "0.75rem",
+            marginBottom: "1rem"
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: "0.25rem" }}>
+            There's an extra {formatAmount(evenSplitRemainderCents / 100)} to assign.
+          </strong>
+          <p className="muted" style={{ margin: 0 }}>
+            Choose who should cover the remaining cents below.
+          </p>
+          <button
+            type="button"
+            className="secondary"
+            style={{ marginTop: "0.5rem" }}
+            onClick={() =>
+              remainderSectionRef.current?.scrollIntoView({
+                behavior: "smooth",
+                block: "center"
+              })
+            }
+          >
+            Go to assignment
+          </button>
+        </div>
+      )}
+
       {splitEvenly && evenSplitRemainderCents > 0 && sharedMembers.length > 0 && (
-        <div className="input-group">
+        <div
+          className="input-group"
+          ref={remainderSectionRef}
+          style={
+            showRemainderPrompt
+              ? {
+                  boxShadow: "0 0 0 2px rgba(250, 204, 21, 0.25)",
+                  borderRadius: "0.75rem",
+                  padding: "0.75rem"
+                }
+              : undefined
+          }
+        >
           <label htmlFor="even-split-remainder">
             Assign leftover {formatAmount(evenSplitRemainderCents / 100)} to
           </label>
           <select
             id="even-split-remainder"
             value={remainderMemberId}
-            onChange={(event) => setRemainderMemberId(event.target.value)}
+            onChange={(event) => handleRemainderMemberChange(event.target.value)}
           >
             {sharedMembers.map((member) => (
               <option key={member.memberId} value={member.memberId}>
@@ -1098,6 +1250,68 @@ const AddExpenseForm = ({
       <button type="submit" className="primary" disabled={isSubmitting}>
         {isSubmitting ? "Saving…" : "Add expense"}
       </button>
+
+      {pendingExpense && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.75)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 1000,
+            padding: "1.5rem"
+          }}
+        >
+          <div
+            style={{
+              background: "#0f172a",
+              borderRadius: "1rem",
+              padding: "1.5rem",
+              width: "min(420px, 100%)",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.35)",
+              border: "1px solid rgba(148,163,184,0.2)"
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: "0.75rem" }}>Confirm details</h3>
+            <p className="muted" style={{ marginBottom: "0.75rem" }}>
+              <strong>{pendingExpense.payerName}</strong> paid{" "}
+              <strong>{formatAmount(pendingExpense.payload.total)}</strong>. Please confirm the split before saving.
+            </p>
+            <div
+              style={{
+                border: "1px solid rgba(148,163,184,0.2)",
+                borderRadius: "0.75rem",
+                padding: "0.75rem",
+                marginBottom: "1rem"
+              }}
+            >
+              <p className="muted" style={{ marginTop: 0 }}>
+                People to reimburse:
+              </p>
+              <ul style={{ margin: 0, paddingLeft: "1.25rem" }}>
+                {pendingExpense.allocationSummary.map((item) => (
+                  <li key={item.memberId} style={{ marginBottom: "0.35rem" }}>
+                    <span>{item.displayName}</span>{" "}
+                    <strong>{formatAmount(item.amount)}</strong>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem" }}>
+              <button type="button" className="secondary" onClick={handleCancelConfirmation} disabled={isSubmitting}>
+                Go back
+              </button>
+              <button type="button" className="primary" onClick={handleConfirmSubmit} disabled={isSubmitting}>
+                {isSubmitting ? "Saving…" : "Confirm & save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   );
 };

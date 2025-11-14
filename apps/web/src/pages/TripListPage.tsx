@@ -167,14 +167,13 @@ const TripListPage = () => {
                   {trip.startDate ? `${trip.startDate}` : "Flexible dates"}
                   {trip.endDate ? ` → ${trip.endDate}` : ""}
                 </p>
-                <div className="pill">Currency • {trip.currency}</div>
-                {trip.outstandingBalance && trip.outstandingBalance > 0 && (
+                {typeof trip.outstandingBalance === "number" && trip.outstandingBalance > 0 && (
                   <div className="pill" style={{ background: "#FEF3C7", color: "#92400E" }}>
                     You owe • {formatCurrencyValue(trip.outstandingBalance, trip.currency)}
                   </div>
                 )}
                 {!trip.outstandingBalance &&
-                  trip.owedToYou &&
+                  typeof trip.owedToYou === "number" &&
                   trip.owedToYou > 0 && (
                     <div className="pill" style={{ background: "#DCFCE7", color: "#166534" }}>
                       You're owed • {formatCurrencyValue(trip.owedToYou, trip.currency)}
