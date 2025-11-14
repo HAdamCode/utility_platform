@@ -95,7 +95,8 @@ const expenseSchema = z.object({
     )
     .optional(),
   splitEvenly: z.boolean().optional(),
-  receiptId: z.string().optional()
+  receiptId: z.string().optional(),
+  remainderMemberId: z.string().optional()
 });
 
 const updateExpenseSchema = z.object({
@@ -110,7 +111,8 @@ const updateExpenseSchema = z.object({
         amount: z.number().nonnegative()
       })
     )
-    .optional()
+    .optional(),
+  remainderMemberId: z.string().optional()
 });
 
 const receiptSchema = z.object({
@@ -225,6 +227,50 @@ const computeBalances = (
     displayName: member.displayName,
     balance: roundCents(balances.get(member.memberId) || 0)
   }));
+};
+
+const resolveRemainderTarget = (
+  memberIds: string[],
+  preferredId?: string,
+  fallbackId?: string
+): string | undefined => {
+  if (!memberIds.length) return undefined;
+  if (preferredId && memberIds.includes(preferredId)) {
+    return preferredId;
+  }
+  if (fallbackId && memberIds.includes(fallbackId)) {
+    return fallbackId;
+  }
+  return memberIds[memberIds.length - 1];
+};
+
+const buildEvenSplitAllocations = (
+  total: number,
+  memberIds: string[],
+  remainderMemberId?: string
+) => {
+  if (!memberIds.length) return [];
+
+  const totalCents = Math.round(total * 100);
+  const absoluteCents = Math.abs(totalCents);
+  const baseShare = Math.floor(absoluteCents / memberIds.length);
+  let remainder = absoluteCents - baseShare * memberIds.length;
+  const sign = totalCents < 0 ? -1 : 1;
+  const target = remainderMemberId && memberIds.includes(remainderMemberId)
+    ? remainderMemberId
+    : memberIds[memberIds.length - 1];
+
+  return memberIds.map((memberId) => {
+    let cents = baseShare;
+    if (remainder > 0 && memberId === target) {
+      cents += remainder;
+      remainder = 0;
+    }
+    return {
+      memberId,
+      amount: roundCents((cents * sign) / 100)
+    };
+  });
 };
 
 export class TripService {
@@ -593,21 +639,19 @@ export class TripService {
       }
     }
 
+    const splitWith = parsed.data.sharedWithMemberIds;
     let allocations = parsed.data.allocations ?? [];
     if (parsed.data.splitEvenly || !allocations.length) {
-      const splitWith = parsed.data.sharedWithMemberIds;
-      const perPerson = roundCents(
-        parsed.data.total / splitWith.length
+      const remainderTarget = resolveRemainderTarget(
+        splitWith,
+        parsed.data.remainderMemberId,
+        parsed.data.paidByMemberId
       );
-      allocations = splitWith.map((memberId, index) => {
-        if (index === splitWith.length - 1) {
-          // last person gets remainder
-          const assigned = perPerson * (splitWith.length - 1);
-          const remainder = roundCents(parsed.data.total - assigned);
-          return { memberId, amount: remainder };
-        }
-        return { memberId, amount: perPerson };
-      });
+      allocations = buildEvenSplitAllocations(
+        parsed.data.total,
+        splitWith,
+        remainderTarget
+      );
     }
 
     const allocatedTotal = roundCents(
@@ -704,15 +748,16 @@ export class TripService {
     ) {
       const sharedMembers = parsed.data.sharedWithMemberIds;
       const total = parsed.data.total;
-      const perPerson = roundCents(total / sharedMembers.length);
-      allocations = sharedMembers.map((memberId, index) => {
-        if (index === sharedMembers.length - 1) {
-          const assigned = perPerson * (sharedMembers.length - 1);
-          const remainder = roundCents(total - assigned);
-          return { memberId, amount: remainder };
-        }
-        return { memberId, amount: perPerson };
-      });
+      const remainderTarget = resolveRemainderTarget(
+        sharedMembers,
+        parsed.data.remainderMemberId,
+        expense.paidByMemberId
+      );
+      allocations = buildEvenSplitAllocations(
+        total,
+        sharedMembers,
+        remainderTarget
+      );
     }
 
     if (parsed.data.total ?? parsed.data.allocations) {

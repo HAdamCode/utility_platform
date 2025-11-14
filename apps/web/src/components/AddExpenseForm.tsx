@@ -15,7 +15,8 @@ const parseCurrencyInput = (value: string): number => {
 
 const distributeEvenly = (
   amount: number,
-  memberIds: string[]
+  memberIds: string[],
+  remainderTargetId?: string
 ): Record<string, number> => {
   if (memberIds.length === 0 || Math.abs(amount) < 0.0001) {
     return {};
@@ -26,12 +27,19 @@ const distributeEvenly = (
   const baseShare = Math.floor(absoluteCents / memberIds.length);
   let remainder = absoluteCents - baseShare * memberIds.length;
   const sign = totalCents < 0 ? -1 : 1;
+  const hasTarget =
+    remainderTargetId !== undefined && memberIds.includes(remainderTargetId);
 
   return memberIds.reduce<Record<string, number>>((acc, memberId) => {
     let cents = baseShare;
     if (remainder > 0) {
-      cents += 1;
-      remainder -= 1;
+      if (hasTarget && memberId === remainderTargetId) {
+        cents += remainder;
+        remainder = 0;
+      } else if (!hasTarget) {
+        cents += 1;
+        remainder -= 1;
+      }
     }
     acc[memberId] = (cents * sign) / 100;
     return acc;
@@ -136,6 +144,7 @@ export interface CreateExpenseInput {
   paidByMemberId: string;
   sharedWithMemberIds: string[];
   splitEvenly: boolean;
+  remainderMemberId?: string;
   allocations?: { memberId: string; amount: number }[];
   receiptId?: string;
 }
@@ -184,6 +193,7 @@ const AddExpenseForm = ({
   const [splitEvenly, setSplitEvenly] = useState(true);
   const [splitExtrasEvenly, setSplitExtrasEvenly] = useState(false);
   const [allocations, setAllocations] = useState<Record<string, string>>({});
+  const [remainderMemberId, setRemainderMemberId] = useState<string>("");
   const [receiptId, setReceiptId] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [receiptStatusMessage, setReceiptStatusMessage] = useState<string | null>(null);
@@ -220,6 +230,21 @@ const AddExpenseForm = ({
       return next;
     });
   }, [sharedWith]);
+
+  useEffect(() => {
+    setRemainderMemberId((current) => {
+      if (sharedWith.length === 0) {
+        return "";
+      }
+      if (current && sharedWith.includes(current)) {
+        return current;
+      }
+      if (sharedWith.includes(paidBy)) {
+        return paidBy;
+      }
+      return sharedWith[0];
+    });
+  }, [sharedWith, paidBy]);
 
   const currencyFormatter = useMemo(
     () =>
@@ -279,6 +304,14 @@ const AddExpenseForm = ({
     () => roundToCents(customAllocationPreview.total - grossTotal),
     [customAllocationPreview, grossTotal]
   );
+
+  const evenSplitRemainderCents = useMemo(() => {
+    if (!splitEvenly || sharedWith.length === 0 || grossTotal <= 0) {
+      return 0;
+    }
+    const totalCents = Math.round(Math.abs(grossTotal * 100));
+    return totalCents % sharedWith.length;
+  }, [splitEvenly, grossTotal, sharedWith]);
 
   const allocationStatusMessage = useMemo(() => {
     if (grossTotal <= 0) {
@@ -583,7 +616,11 @@ const AddExpenseForm = ({
     let allocationsPayload: { memberId: string; amount: number }[] = [];
 
     if (splitEvenly) {
-      const distribution = distributeEvenly(grossTotal, sharedWith);
+      const distribution = distributeEvenly(
+        grossTotal,
+        sharedWith,
+        remainderMemberId
+      );
       allocationsPayload = sharedWith.map((memberId) => ({
         memberId,
         amount: Math.abs(roundToCents(distribution[memberId] ?? 0))
@@ -615,6 +652,7 @@ const AddExpenseForm = ({
       paidByMemberId: paidBy,
       sharedWithMemberIds: sharedWith,
       splitEvenly,
+      remainderMemberId: splitEvenly ? remainderMemberId || undefined : undefined,
       allocations: allocationsPayload,
       receiptId: receiptId || undefined
     };
@@ -897,6 +935,29 @@ const AddExpenseForm = ({
           </button>
         </div>
       </div>
+
+      {splitEvenly && evenSplitRemainderCents > 0 && sharedMembers.length > 0 && (
+        <div className="input-group">
+          <label htmlFor="even-split-remainder">
+            Assign leftover {formatAmount(evenSplitRemainderCents / 100)} to
+          </label>
+          <select
+            id="even-split-remainder"
+            value={remainderMemberId}
+            onChange={(event) => setRemainderMemberId(event.target.value)}
+          >
+            {sharedMembers.map((member) => (
+              <option key={member.memberId} value={member.memberId}>
+                {member.displayName}
+                {currentUserId === member.memberId ? " (you)" : ""}
+              </option>
+            ))}
+          </select>
+          <p className="muted" style={{ marginTop: "0.25rem" }}>
+            Total does not divide evenly across {sharedMembers.length} people. Choose who should cover the remaining cents.
+          </p>
+        </div>
+      )}
 
       {!splitEvenly && (
         <>
