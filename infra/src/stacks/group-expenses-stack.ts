@@ -33,7 +33,8 @@ import {
   AccountRecovery,
   OAuthScope,
   UserPool,
-  UserPoolClient
+  UserPoolClient,
+  UserPoolOperation
 } from "aws-cdk-lib/aws-cognito";
 import { NodejsFunction, OutputFormat } from "aws-cdk-lib/aws-lambda-nodejs";
 import { Runtime } from "aws-cdk-lib/aws-lambda";
@@ -195,7 +196,25 @@ export class GroupExpensesStack extends Stack {
 
     table.grantReadWriteData(httpLambda);
     table.grantReadWriteData(textractLambda);
+    const postConfirmationLambda = new NodejsFunction(
+      this,
+      "PostConfirmationHandler",
+      {
+        ...sharedFunctionProps,
+        entry: path.join(
+          __dirname,
+          "../../../services/api/src/handlers/postConfirmation.ts"
+        ),
+        logRetention: RetentionDays.ONE_WEEK,
+        environment: {
+          TABLE_NAME: table.tableName,
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+        }
+      }
+    );
 
+    table.grantReadWriteData(postConfirmationLambda);
+    userPool.addTrigger(UserPoolOperation.POST_CONFIRMATION, postConfirmationLambda);
     receiptBucket.grantPut(httpLambda);
     receiptBucket.grantRead(httpLambda);
     receiptBucket.grantRead(textractLambda);

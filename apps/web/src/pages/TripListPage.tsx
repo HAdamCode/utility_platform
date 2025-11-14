@@ -16,6 +16,19 @@ const defaultFormState: FormState = {
   endDate: ""
 };
 
+type TripWithStatus = Trip & {
+  outstandingBalance?: number;
+  owedToYou?: number;
+  hasPendingActions?: boolean;
+};
+
+const formatCurrencyValue = (value: number, currency: string) =>
+  new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2
+  }).format(value);
+
 const TripListPage = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -31,7 +44,15 @@ const TripListPage = () => {
     queryFn: () => api.get<TripListResponse>("/trips")
   });
 
-  const trips = useMemo(() => data?.trips ?? [], [data]);
+  const trips = useMemo<TripWithStatus[]>(() => (data?.trips ?? []) as TripWithStatus[], [data]);
+  const outstandingTripCount = useMemo(
+    () => trips.filter((trip) => (trip.outstandingBalance ?? 0) > 0).length,
+    [trips]
+  );
+  const pendingTripCount = useMemo(
+    () => trips.filter((trip) => trip.hasPendingActions).length,
+    [trips]
+  );
 
   const createMutation = useMutation({
     mutationFn: (payload: unknown) => api.post<Trip>("/trips", payload),
@@ -115,6 +136,19 @@ const TripListPage = () => {
           <h2>Your Groups</h2>
           <span className="muted">{trips.length} active</span>
         </div>
+        {trips.length > 0 && (
+          <p className="muted" style={{ marginTop: "0.5rem" }}>
+            {outstandingTripCount > 0
+              ? `You have outstanding payments on ${outstandingTripCount} ${outstandingTripCount === 1 ? "group" : "groups"}.`
+              : "No outstanding payments right now."}
+            {pendingTripCount > 0 && (
+              <>
+                {" "}
+                {pendingTripCount} {pendingTripCount === 1 ? "group has" : "groups have"} pending confirmations.
+              </>
+            )}
+          </p>
+        )}
         {isLoading ? (
           <p className="muted">Loading groups…</p>
         ) : trips.length === 0 ? (
@@ -134,6 +168,23 @@ const TripListPage = () => {
                   {trip.endDate ? ` → ${trip.endDate}` : ""}
                 </p>
                 <div className="pill">Currency • {trip.currency}</div>
+                {trip.outstandingBalance && trip.outstandingBalance > 0 && (
+                  <div className="pill" style={{ background: "#FEF3C7", color: "#92400E" }}>
+                    You owe • {formatCurrencyValue(trip.outstandingBalance, trip.currency)}
+                  </div>
+                )}
+                {!trip.outstandingBalance &&
+                  trip.owedToYou &&
+                  trip.owedToYou > 0 && (
+                    <div className="pill" style={{ background: "#DCFCE7", color: "#166534" }}>
+                      You're owed • {formatCurrencyValue(trip.owedToYou, trip.currency)}
+                    </div>
+                  )}
+                {trip.hasPendingActions && (
+                  <div className="pill" style={{ background: "#E0E7FF", color: "#312E81" }}>
+                    Pending confirmations
+                  </div>
+                )}
               </Link>
             ))}
           </div>

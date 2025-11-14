@@ -164,6 +164,12 @@ export interface TripSummary {
   currentUserId: string;
 }
 
+export interface TripListItem extends Trip {
+  outstandingBalance: number;
+  owedToYou: number;
+  hasPendingActions: boolean;
+}
+
 const roundCents = (value: number): number =>
   Math.round((value + Number.EPSILON) * 100) / 100;
 
@@ -222,9 +228,40 @@ const computeBalances = (
 };
 
 export class TripService {
-  async listTrips(auth: AuthContext): Promise<Trip[]> {
+  async listTrips(auth: AuthContext): Promise<TripListItem[]> {
     await ensureCurrentUserProfile(auth);
-    return getTripStore().listTripsForMember(auth.userId);
+    const trips = await getTripStore().listTripsForMember(auth.userId);
+
+    const enrichedTrips = await Promise.all(
+      trips.map(async (trip) => {
+        const details = await getTripStore().getTripDetails(trip.tripId);
+        const balances = computeBalances(
+          details.members,
+          details.expenses,
+          details.settlements
+        );
+        const userBalance =
+          balances.find((row) => row.memberId === auth.userId)?.balance ?? 0;
+        const outstandingBalance =
+          userBalance < -0.01 ? Math.abs(userBalance) : 0;
+        const owedToYou = userBalance > 0.01 ? userBalance : 0;
+        const hasPendingActions = details.settlements.some(
+          (settlement) =>
+            !settlement.confirmedAt &&
+            (settlement.fromMemberId === auth.userId ||
+              settlement.toMemberId === auth.userId)
+        );
+
+        return {
+          ...trip,
+          outstandingBalance: roundCents(outstandingBalance),
+          owedToYou: roundCents(owedToYou),
+          hasPendingActions
+        };
+      })
+    );
+
+    return enrichedTrips;
   }
 
   async createTrip(body: unknown, auth: AuthContext): Promise<Trip> {
