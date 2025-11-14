@@ -386,6 +386,16 @@ const TripDetailPage = () => {
   const { trip, members, expenses, receipts, balances, settlements, pendingSettlements } = data;
   const effectiveCurrentUserId = loggedInUserId ?? data.currentUserId;
   const canManageMembers = trip.ownerId === effectiveCurrentUserId;
+  const settlementAmountFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: trip.currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+    [trip.currency]
+  );
 
   return (
     <div className="trip-detail">
@@ -402,7 +412,7 @@ const TripDetailPage = () => {
             <h2 style={{ margin: 0 }}>{trip.name}</h2>
             <p className="muted" style={{ margin: "0.5rem 0 0" }}>
               {trip.startDate ? trip.startDate : "Flexible start"}
-              {trip.endDate ? ` → ${trip.endDate}` : ""} • {trip.currency}
+              {trip.endDate ? ` → ${trip.endDate}` : ""}
             </p>
           </div>
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -595,64 +605,77 @@ interface OverviewTabProps {
   currency: string;
 }
 
-const OverviewTab = ({ balances, membersById, settlementSuggestions, currency }: OverviewTabProps) => (
-  <div className="grid-two">
-    <section className="card">
-      <div className="section-title">
-        <h2>Balances</h2>
-      </div>
-      <div className="list">
-        {balances.length === 0 ? (
-          <p className="muted">No balances yet.</p>
-        ) : (
-          balances.map((balance) => (
-            <div
-              key={balance.memberId}
-              className="card"
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                padding: "0.75rem 1rem"
-              }}
-            >
-              <span>{membersById[balance.memberId] ?? balance.memberId}</span>
-              <strong
-                style={{
-                  color: balance.balance >= 0 ? "#4ade80" : "#f97316"
-                }}
-              >
-                {balance.balance.toFixed(2)} {currency}
-              </strong>
-            </div>
-          ))
-        )}
-      </div>
-    </section>
+const OverviewTab = ({ balances, membersById, settlementSuggestions, currency }: OverviewTabProps) => {
+  const currencyFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+    [currency]
+  );
 
-    {settlementSuggestions.length > 0 && (
+  return (
+    <div className="grid-two">
       <section className="card">
         <div className="section-title">
-          <h2>Suggested Settlements</h2>
+          <h2>Balances</h2>
         </div>
         <div className="list">
-          {settlementSuggestions.map((suggestion, index) => (
-            <div key={`${suggestion.from}-${suggestion.to}-${index}`} className="card" style={{ padding: "0.75rem 1rem" }}>
-              <p style={{ margin: 0 }}>
-                <strong>{membersById[suggestion.from] ?? suggestion.from}</strong> should pay {" "}
-                <strong>{suggestion.amount.toFixed(2)} {currency}</strong> to {" "}
-                <strong>{membersById[suggestion.to] ?? suggestion.to}</strong>
-              </p>
-            </div>
-          ))}
+          {balances.length === 0 ? (
+            <p className="muted">No balances yet.</p>
+          ) : (
+            balances.map((balance) => (
+              <div
+                key={balance.memberId}
+                className="card"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "0.75rem 1rem"
+                }}
+              >
+                <span>{membersById[balance.memberId] ?? balance.memberId}</span>
+                <strong
+                  style={{
+                    color: balance.balance >= 0 ? "#4ade80" : "#f97316"
+                  }}
+                >
+                  {currencyFormatter.format(balance.balance)}
+                </strong>
+              </div>
+            ))
+          )}
         </div>
-        <p className="muted">
-          These suggestions settle the current balances assuming no additional expenses or settlements.
-        </p>
       </section>
-    )}
-  </div>
-);
+
+      {settlementSuggestions.length > 0 && (
+        <section className="card">
+          <div className="section-title">
+            <h2>Suggested Settlements</h2>
+          </div>
+          <div className="list">
+            {settlementSuggestions.map((suggestion, index) => (
+              <div key={`${suggestion.from}-${suggestion.to}-${index}`} className="card" style={{ padding: "0.75rem 1rem" }}>
+                <p style={{ margin: 0 }}>
+                  <strong>{membersById[suggestion.from] ?? suggestion.from}</strong> should pay{" "}
+                  <strong>{currencyFormatter.format(suggestion.amount)}</strong> to{" "}
+                  <strong>{membersById[suggestion.to] ?? suggestion.to}</strong>
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="muted">
+            These suggestions settle the current balances assuming no additional expenses or settlements.
+          </p>
+        </section>
+      )}
+    </div>
+  );
+};
 
 interface ExpensesTabProps {
   receipts: TripSummary["receipts"];
@@ -1621,7 +1644,7 @@ const SettlementsTab = ({
                   <strong>{from}</strong> paid <strong>{to}</strong>
                 </p>
                 <p className="muted" style={{ margin: 0 }}>
-                  {settlement.amount.toFixed(2)} {settlement.currency}
+                  {settlementAmountFormatter.format(settlement.amount)}
                 </p>
                 {settlement.note && (
                   <p className="muted" style={{ margin: "0.4rem 0 0" }}>

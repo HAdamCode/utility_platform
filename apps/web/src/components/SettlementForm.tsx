@@ -151,7 +151,7 @@ const SettlementForm = ({ members, currency, onSubmit, isSubmitting, currentUser
       </div>
 
       <div className="input-group">
-        <label>Amount ({currency})</label>
+        <label>Amount</label>
         <input
           type="number"
           inputMode="decimal"

@@ -842,7 +842,7 @@ const AddExpenseForm = ({
       </div>
 
       <div className="input-group">
-        <label htmlFor="expense-subtotal">Subtotal ({currency})</label>
+        <label htmlFor="expense-subtotal">Subtotal</label>
         <input
           id="expense-subtotal"
           type="number"
@@ -856,7 +856,7 @@ const AddExpenseForm = ({
 
       <div style={{ display: "flex", gap: "0.75rem" }}>
         <div className="input-group" style={{ flex: 1 }}>
-          <label htmlFor="expense-tax">Tax ({currency})</label>
+          <label htmlFor="expense-tax">Tax</label>
           <input
             id="expense-tax"
             type="number"
@@ -868,7 +868,7 @@ const AddExpenseForm = ({
           />
         </div>
         <div className="input-group" style={{ flex: 1 }}>
-          <label htmlFor="expense-tip">Tip ({currency})</label>
+          <label htmlFor="expense-tip">Tip</label>
           <input
             id="expense-tip"
             type="number"
