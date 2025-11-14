@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { TripMember, Receipt, TextractExtraction } from "../types";
 
@@ -645,6 +645,12 @@ const AddExpenseForm = ({
     }
   };
 
+  const handleNumberInputWheel = useCallback((event: WheelEvent<HTMLInputElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.blur();
+  }, []);
+
   const resetFormState = () => {
     setDescription("");
     setVendor("");
@@ -851,6 +857,7 @@ const AddExpenseForm = ({
           step="0.01"
           value={subtotalInput}
           onChange={(event) => setSubtotalInput(event.target.value)}
+          onWheel={handleNumberInputWheel}
         />
       </div>
 
@@ -865,6 +872,7 @@ const AddExpenseForm = ({
             step="0.01"
             value={taxInput}
             onChange={(event) => setTaxInput(event.target.value)}
+            onWheel={handleNumberInputWheel}
           />
         </div>
         <div className="input-group" style={{ flex: 1 }}>
@@ -877,6 +885,7 @@ const AddExpenseForm = ({
             step="0.01"
             value={tipInput}
             onChange={(event) => setTipInput(event.target.value)}
+            onWheel={handleNumberInputWheel}
           />
         </div>
       </div>
@@ -1133,6 +1142,7 @@ const AddExpenseForm = ({
                     onChange={(event) =>
                       handleAllocationChange(member.memberId, event.target.value)
                     }
+                    onWheel={handleNumberInputWheel}
                   />
                   {splitExtrasEvenly && Math.abs(extrasShare) >= 0.005 && (
                     <p className="muted" style={{ marginTop: "0.25rem" }}>

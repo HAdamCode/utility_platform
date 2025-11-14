@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, WheelEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { TripMember } from "../types";
 
 interface SettlementFormProps {
@@ -74,6 +74,12 @@ const SettlementForm = ({ members, currency, onSubmit, isSubmitting, currentUser
       setFromMemberId(preferredFromMember);
     }
   }, [preferredFromMember, fromManuallySelected]);
+
+  const handleNumberInputWheel = useCallback((event: WheelEvent<HTMLInputElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.blur();
+  }, []);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -159,6 +165,7 @@ const SettlementForm = ({ members, currency, onSubmit, isSubmitting, currentUser
           step="0.01"
           value={amount}
           onChange={(event) => setAmount(event.target.value)}
+          onWheel={handleNumberInputWheel}
         />
       </div>
 
