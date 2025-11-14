@@ -28,7 +28,7 @@ export const modules: ModuleDefinition[] = [
     name: "Harmony Collective",
     description:
       "Private ledger for Harmony Collective donations, revenue, expenses, and reimbursements.",
-    path: "/harmony-ledger",
+    path: "/harmony-ledger/overview",
     tags: ["finance", "operations", "ledger"],
     maturity: "alpha",
     icon: <LedgerGlyphIcon />,

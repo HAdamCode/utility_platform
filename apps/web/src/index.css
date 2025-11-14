@@ -281,6 +281,46 @@ button.ghost {
   background: rgba(56, 189, 248, 0.1);
 }
 
+.sub-nav {
+  display: inline-flex;
+  gap: 0.5rem;
+  background: rgba(15, 23, 42, 0.8);
+  padding: 0.4rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.sub-link {
+  text-decoration: none;
+  color: #94a3b8;
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.sub-link.active {
+  background: rgba(56, 189, 248, 0.2);
+  color: #f8fafc;
+}
+
+.overview-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.overview-card {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 16px;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.7);
+}
+
+.overview-card.highlight {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(16, 185, 129, 0.1));
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
 .grid-two {
   display: grid;
   gap: 1rem;

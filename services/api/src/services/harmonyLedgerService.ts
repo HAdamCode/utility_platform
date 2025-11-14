@@ -73,6 +73,10 @@ const transferSchema = z
     message: "Provide different source and destination"
   });
 
+const deleteTransferSchema = z.object({
+  createdAt: z.string().min(1)
+});
+
 export interface HarmonyLedgerAccessResponse {
   allowed: boolean;
   isAdmin: boolean;
@@ -91,6 +95,13 @@ export interface HarmonyLedgerEntriesResponse {
   };
   groups: HarmonyLedgerGroup[];
   groupSummaries: HarmonyLedgerGroupSummary[];
+  unallocated: HarmonyLedgerUnallocatedSummary;
+  transfers: HarmonyLedgerTransfer[];
+}
+
+export interface HarmonyLedgerOverviewResponse {
+  totals: HarmonyLedgerEntriesResponse["totals"];
+  groups: HarmonyLedgerGroupSummary[];
   unallocated: HarmonyLedgerUnallocatedSummary;
   transfers: HarmonyLedgerTransfer[];
 }
@@ -348,6 +359,16 @@ export class HarmonyLedgerService {
     };
   }
 
+  async getOverview(auth: AuthContext): Promise<HarmonyLedgerOverviewResponse> {
+    const data = await this.getEntries(auth);
+    return {
+      totals: data.totals,
+      groups: data.groupSummaries,
+      unallocated: data.unallocated,
+      transfers: data.transfers
+    };
+  }
+
   async createEntry(
     body: unknown,
     auth: AuthContext
@@ -472,6 +493,19 @@ export class HarmonyLedgerService {
 
     await this.store.createTransfer(transfer);
     return transfer;
+  }
+
+  async deleteTransfer(
+    transferId: string,
+    body: unknown,
+    auth: AuthContext
+  ): Promise<void> {
+    await this.requireAccess(auth);
+    const parsed = deleteTransferSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.message);
+    }
+    await this.store.deleteTransfer(transferId, parsed.data.createdAt);
   }
 
   async getAccessOverview(auth: AuthContext): Promise<HarmonyLedgerAccessResponse> {

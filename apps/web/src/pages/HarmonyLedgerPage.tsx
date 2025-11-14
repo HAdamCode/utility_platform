@@ -1,6 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
+import HarmonySubNav from "../components/HarmonySubNav";
 import {
   HarmonyLedgerAccessRecord,
   HarmonyLedgerAccessResponse,
@@ -99,6 +100,7 @@ const HarmonyLedgerPage = () => {
     note: ""
   });
   const [menuEntryId, setMenuEntryId] = useState<string | null>(null);
+  const [menuTransferId, setMenuTransferId] = useState<string | null>(null);
   const [accessForm, setAccessForm] = useState({
     email: "",
     displayName: "",
@@ -190,6 +192,16 @@ const HarmonyLedgerPage = () => {
     }
   });
 
+  const deleteTransferMutation = useMutation({
+    mutationFn: (payload: { transferId: string; createdAt: string }) =>
+      api.delete(`/harmony-ledger/transfers/${payload.transferId}`, {
+        createdAt: payload.createdAt
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["harmony-ledger", "entries"] });
+    }
+  });
+
   const totals = entriesQuery.data?.totals;
   const entries = entriesQuery.data?.entries ?? [];
   const groups = entriesQuery.data?.groups ?? [];
@@ -275,6 +287,17 @@ const HarmonyLedgerPage = () => {
       recordedAt: entry.recordedAt
     });
     setMenuEntryId(null);
+  };
+
+  const handleDeleteTransfer = (transfer: HarmonyLedgerTransfer) => {
+    if (!window.confirm("Delete this transfer?")) {
+      return;
+    }
+    deleteTransferMutation.mutate({
+      transferId: transfer.transferId,
+      createdAt: transfer.createdAt
+    });
+    setMenuTransferId(null);
   };
 
   const handleAccessSubmit = (event: FormEvent) => {
@@ -432,6 +455,7 @@ const HarmonyLedgerPage = () => {
 
   return (
     <div className="list" style={{ gap: "1.5rem" }}>
+      <HarmonySubNav />
       <div className="grid-two">
         <section className="card">
           <div className="section-title">
@@ -818,6 +842,7 @@ const HarmonyLedgerPage = () => {
                   <th style={{ width: "20%" }}>To</th>
                   <th style={{ width: "15%" }}>Amount</th>
                   <th>Note</th>
+                  <th style={{ width: "8%" }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -828,6 +853,33 @@ const HarmonyLedgerPage = () => {
                     <td>{transfer.toGroupName ?? "Unallocated"}</td>
                     <td>{formatCurrencyValue(transfer.amount, transfer.currency)}</td>
                     <td>{transfer.note ?? "—"}</td>
+                    <td className="entry-actions">
+                      <button
+                        type="button"
+                        className="icon-button"
+                        onClick={() =>
+                          setMenuTransferId((current) =>
+                            current === transfer.transferId ? null : transfer.transferId
+                          )
+                        }
+                      >
+                        ⋮
+                      </button>
+                      {menuTransferId === transfer.transferId && (
+                        <div className="entry-menu">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTransfer(transfer)}
+                            disabled={deleteTransferMutation.isPending}
+                          >
+                            Delete transfer
+                          </button>
+                          <button type="button" onClick={() => setMenuTransferId(null)}>
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

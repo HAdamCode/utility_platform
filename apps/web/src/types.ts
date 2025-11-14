@@ -205,6 +205,13 @@ export interface HarmonyLedgerEntriesResponse {
   transfers: HarmonyLedgerTransfer[];
 }
 
+export interface HarmonyLedgerOverviewResponse {
+  totals: HarmonyLedgerTotals;
+  groups: HarmonyLedgerGroupSummary[];
+  unallocated: HarmonyLedgerUnallocatedSummary;
+  transfers: HarmonyLedgerTransfer[];
+}
+
 export interface HarmonyLedgerAccessRecord {
   accessId: string;
   userId?: string;

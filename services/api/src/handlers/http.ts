@@ -97,6 +97,11 @@ export const handler = async (
       return ok(data, origin);
     }
 
+    if (path === "/harmony-ledger/overview" && method === "GET") {
+      const overview = await harmonyLedgerService.getOverview(auth);
+      return ok(overview, origin);
+    }
+
     if (path === "/harmony-ledger/entries" && method === "POST") {
       const body = parseBody(event);
       const entry = await harmonyLedgerService.createEntry(body, auth);
@@ -128,6 +133,17 @@ export const handler = async (
       const body = parseBody(event);
       const transfer = await harmonyLedgerService.createTransfer(body, auth);
       return created(transfer, origin);
+    }
+
+    const transferMatch = path.match(/^\/harmony-ledger\/transfers\/([^/]+)$/);
+    if (transferMatch && method === "DELETE") {
+      const transferId = decodeURIComponent(transferMatch[1]);
+      const body = parseBody(event);
+      if (!body) {
+        return handleError(new ValidationError("Request body required"), origin);
+      }
+      await harmonyLedgerService.deleteTransfer(transferId, body, auth);
+      return noContent(origin);
     }
 
     if (method === "GET" && path === "/trips") {

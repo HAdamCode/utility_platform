@@ -133,6 +133,18 @@ export interface HarmonyLedgerGroup {
   createdBy: string;
 }
 
+export interface HarmonyLedgerGroupSummary {
+  groupId: string;
+  name: string;
+  donations: number;
+  income: number;
+  expenses: number;
+  reimbursements: number;
+  transfersIn: number;
+  transfersOut: number;
+  net: number;
+}
+
 export interface HarmonyLedgerUnallocatedSummary {
   donations: number;
   income: number;

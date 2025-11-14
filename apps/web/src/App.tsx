@@ -16,10 +16,12 @@ import ModuleHub from "./pages/ModuleHub";
 import { modules } from "./modules/registry";
 import { WorkspaceBadgeIcon } from "./components/icons/UtilityIcons";
 import HarmonyLedgerPage from "./pages/HarmonyLedgerPage";
+import HarmonyOverviewPage from "./pages/HarmonyOverviewPage";
 import { useHarmonyLedgerAccess } from "./modules/useHarmonyLedgerAccess";
 
 const queryClient = new QueryClient();
 const GroupExpensesModule = () => <Outlet />;
+const HarmonyModule = () => <Outlet />;
 
 interface AmplifyUser {
   attributes?: Record<string, string>;
@@ -98,7 +100,11 @@ const AppContent = ({ user, signOut }: AppContentProps) => {
             <Route path="trips" element={<TripListPage />} />
             <Route path="trips/:tripId" element={<TripDetailPage />} />
           </Route>
-          <Route path="/harmony-ledger" element={<HarmonyLedgerPage />} />
+          <Route path="/harmony-ledger" element={<HarmonyModule />}>
+            <Route index element={<Navigate to="overview" replace />} />
+            <Route path="overview" element={<HarmonyOverviewPage />} />
+            <Route path="ledger" element={<HarmonyLedgerPage />} />
+          </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

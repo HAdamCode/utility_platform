@@ -510,4 +510,16 @@ export class HarmonyLedgerStore {
       })
     );
   }
+
+  async deleteTransfer(transferId: string, createdAt: string): Promise<void> {
+    await this.docClient.send(
+      new DeleteCommand({
+        TableName: this.tableName,
+        Key: {
+          PK: TRANSFER_PK,
+          SK: TRANSFER_SK(createdAt, transferId)
+        }
+      })
+    );
+  }
 }
