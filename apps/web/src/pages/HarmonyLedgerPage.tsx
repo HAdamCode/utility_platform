@@ -98,6 +98,7 @@ const HarmonyLedgerPage = () => {
     amount: "",
     note: ""
   });
+  const [menuEntryId, setMenuEntryId] = useState<string | null>(null);
   const [accessForm, setAccessForm] = useState({
     email: "",
     displayName: "",
@@ -156,6 +157,16 @@ const HarmonyLedgerPage = () => {
       api.patch<HarmonyLedgerEntry>(`/harmony-ledger/entries/${payload.entryId}`, {
         recordedAt: payload.recordedAt,
         groupId: payload.groupId ?? null
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["harmony-ledger", "entries"] });
+    }
+  });
+
+  const deleteEntryMutation = useMutation({
+    mutationFn: (payload: { entryId: string; recordedAt: string }) =>
+      api.delete(`/harmony-ledger/entries/${payload.entryId}`, {
+        recordedAt: payload.recordedAt
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["harmony-ledger", "entries"] });
@@ -252,6 +263,18 @@ const HarmonyLedgerPage = () => {
       recordedAt: entry.recordedAt,
       groupId: groupId || null
     });
+    setMenuEntryId(null);
+  };
+
+  const handleDeleteEntry = (entry: HarmonyLedgerEntry) => {
+    if (!window.confirm(`Delete "${entry.description ?? "Untitled"}"? This cannot be undone.`)) {
+      return;
+    }
+    deleteEntryMutation.mutate({
+      entryId: entry.entryId,
+      recordedAt: entry.recordedAt
+    });
+    setMenuEntryId(null);
   };
 
   const handleAccessSubmit = (event: FormEvent) => {
@@ -693,11 +716,12 @@ const HarmonyLedgerPage = () => {
               <thead>
                 <tr>
                   <th style={{ width: "15%" }}>Date</th>
-                  <th style={{ width: "12%" }}>Type</th>
+                  <th style={{ width: "10%" }}>Type</th>
                   <th>Description</th>
                   <th style={{ width: "15%" }}>Source</th>
-                  <th style={{ width: "18%" }}>Group</th>
+                  <th style={{ width: "16%" }}>Group</th>
                   <th style={{ width: "15%" }}>Amount</th>
+                  <th style={{ width: "8%" }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -740,6 +764,34 @@ const HarmonyLedgerPage = () => {
                     </td>
                     <td>
                       {formatCurrencyValue(entry.amount, entry.currency)}
+                    </td>
+                    <td className="entry-actions">
+                      <button
+                        type="button"
+                        className="icon-button"
+                        onClick={() =>
+                          setMenuEntryId((current) => (current === entry.entryId ? null : entry.entryId))
+                        }
+                      >
+                        ⋮
+                      </button>
+                      {menuEntryId === entry.entryId && (
+                        <div className="entry-menu">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteEntry(entry)}
+                            disabled={deleteEntryMutation.isPending}
+                          >
+                            Delete entry
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMenuEntryId(null)}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

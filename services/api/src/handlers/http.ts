@@ -114,6 +114,16 @@ export const handler = async (
       return ok(entry, origin);
     }
 
+    if (harmonyEntryMatch && method === "DELETE") {
+      const entryId = decodeURIComponent(harmonyEntryMatch[1]);
+      const body = parseBody(event);
+      if (!body) {
+        return handleError(new ValidationError("Request body required"), origin);
+      }
+      await harmonyLedgerService.deleteEntry(entryId, body, auth);
+      return noContent(origin);
+    }
+
     if (path === "/harmony-ledger/transfers" && method === "POST") {
       const body = parseBody(event);
       const transfer = await harmonyLedgerService.createTransfer(body, auth);

@@ -419,6 +419,19 @@ export class HarmonyLedgerService {
     return this.store.updateEntryGroup(entryId, recordedAt, groupDetails);
   }
 
+  async deleteEntry(
+    entryId: string,
+    body: unknown,
+    auth: AuthContext
+  ): Promise<void> {
+    await this.requireAccess(auth);
+    const parsed = updateEntryGroupSchema.pick({ recordedAt: true }).safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.message);
+    }
+    await this.store.deleteEntry(entryId, parsed.data.recordedAt);
+  }
+
   async createTransfer(body: unknown, auth: AuthContext): Promise<HarmonyLedgerTransfer> {
     const { profile } = await this.requireAccess(auth);
     const parsed = transferSchema.safeParse(body);

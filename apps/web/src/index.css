@@ -237,6 +237,50 @@ button.ghost {
   cursor: pointer;
 }
 
+.entry-actions {
+  position: relative;
+  text-align: right;
+}
+
+.icon-button {
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.entry-menu {
+  position: absolute;
+  right: 0;
+  top: 110%;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 150px;
+  z-index: 2;
+}
+
+.entry-menu button {
+  border: none;
+  background: transparent;
+  color: #f8fafc;
+  text-align: left;
+  padding: 0.35rem 0.25rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.entry-menu button:hover:not(:disabled) {
+  background: rgba(56, 189, 248, 0.1);
+}
+
 .grid-two {
   display: grid;
   gap: 1rem;

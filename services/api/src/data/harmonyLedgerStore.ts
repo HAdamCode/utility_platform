@@ -381,6 +381,18 @@ export class HarmonyLedgerStore {
     return mapEntry(response.Attributes as Record<string, unknown>);
   }
 
+  async deleteEntry(entryId: string, recordedAt: string): Promise<void> {
+    await this.docClient.send(
+      new DeleteCommand({
+        TableName: this.tableName,
+        Key: {
+          PK: ENTRIES_PK,
+          SK: ENTRY_SK(recordedAt, entryId)
+        }
+      })
+    );
+  }
+
   async updateAccessMetadata(
     accessId: string,
     updates: UpdateAccessRecordInput
