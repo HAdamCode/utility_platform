@@ -120,3 +120,105 @@ export interface UserProfile {
   email?: string;
   displayNameLower?: string;
 }
+
+export type HarmonyLedgerEntryType =
+  | "DONATION"
+  | "INCOME"
+  | "EXPENSE"
+  | "REIMBURSEMENT";
+
+export interface HarmonyLedgerEntry {
+  entryId: string;
+  type: HarmonyLedgerEntryType;
+  amount: number;
+  currency: string;
+  description?: string;
+  source?: string;
+  category?: string;
+  notes?: string;
+  memberName?: string;
+  groupId?: string;
+  groupName?: string;
+  recordedAt: string;
+  recordedBy: string;
+  recordedByName?: string;
+}
+
+export interface HarmonyLedgerTotals {
+  donations: number;
+  income: number;
+  expenses: number;
+  reimbursements: number;
+  net: number;
+}
+
+export interface HarmonyLedgerGroup {
+  groupId: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface HarmonyLedgerGroupSummary {
+  groupId: string;
+  name: string;
+  donations: number;
+  income: number;
+  expenses: number;
+  reimbursements: number;
+  transfersIn: number;
+  transfersOut: number;
+  net: number;
+}
+
+export interface HarmonyLedgerUnallocatedSummary {
+  donations: number;
+  income: number;
+  expenses: number;
+  reimbursements: number;
+  transfersIn: number;
+  transfersOut: number;
+  net: number;
+}
+
+export interface HarmonyLedgerTransfer {
+  transferId: string;
+  amount: number;
+  currency: string;
+  fromGroupId?: string;
+  fromGroupName?: string;
+  toGroupId?: string;
+  toGroupName?: string;
+  note?: string;
+  createdAt: string;
+  createdBy: string;
+  createdByName?: string;
+}
+
+export interface HarmonyLedgerEntriesResponse {
+  entries: HarmonyLedgerEntry[];
+  totals: HarmonyLedgerTotals;
+  groups: HarmonyLedgerGroup[];
+  groupSummaries: HarmonyLedgerGroupSummary[];
+  unallocated: HarmonyLedgerUnallocatedSummary;
+  transfers: HarmonyLedgerTransfer[];
+}
+
+export interface HarmonyLedgerAccessRecord {
+  accessId: string;
+  userId?: string;
+  email?: string;
+  displayName?: string;
+  isAdmin: boolean;
+  addedAt: string;
+  addedBy: string;
+  addedByName?: string;
+}
+
+export interface HarmonyLedgerAccessResponse {
+  allowed: boolean;
+  isAdmin: boolean;
+  currentAccessId?: string;
+  members?: HarmonyLedgerAccessRecord[];
+}

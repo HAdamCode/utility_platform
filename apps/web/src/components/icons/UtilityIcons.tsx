@@ -110,3 +110,38 @@ export const ExpensesGlyphIcon = ({
     <circle cx="33" cy="28" r="4" fill="url(#expensesGradient)" opacity="0.8" />
   </svg>
 );
+
+export const LedgerGlyphIcon = ({
+  className,
+  ...props
+}: SVGProps<SVGSVGElement>) => (
+  <svg
+    viewBox="0 0 48 48"
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+    {...props}
+  >
+    <defs>
+      <linearGradient id="ledgerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#38bdf8" />
+        <stop offset="100%" stopColor="#0ea5e9" />
+      </linearGradient>
+    </defs>
+    <rect
+      x="10"
+      y="8"
+      width="28"
+      height="32"
+      rx="6"
+      fill="rgba(14, 165, 233, 0.08)"
+      stroke="url(#ledgerGradient)"
+      strokeWidth="1.5"
+    />
+    <path
+      {...gradientProps}
+      stroke="url(#ledgerGradient)"
+      d="M16 16h16M16 22h12M16 28h16M16 34h10"
+    />
+    <circle cx="30" cy="22" r="3" fill="#38bdf8" opacity="0.8" />
+  </svg>
+);

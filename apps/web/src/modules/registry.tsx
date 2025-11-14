@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ExpensesGlyphIcon } from "../components/icons/UtilityIcons";
+import { ExpensesGlyphIcon, LedgerGlyphIcon } from "../components/icons/UtilityIcons";
 
 export interface ModuleDefinition {
   id: string;
@@ -9,6 +9,7 @@ export interface ModuleDefinition {
   tags: string[];
   maturity: "alpha" | "beta" | "stable";
   icon?: ReactNode;
+  restricted?: boolean;
 }
 
 export const modules: ModuleDefinition[] = [
@@ -21,5 +22,16 @@ export const modules: ModuleDefinition[] = [
     tags: ["travel", "finance", "receipts"],
     maturity: "beta",
     icon: <ExpensesGlyphIcon />
+  },
+  {
+    id: "harmony-ledger",
+    name: "Harmony Collective",
+    description:
+      "Private ledger for Harmony Collective donations, revenue, expenses, and reimbursements.",
+    path: "/harmony-ledger",
+    tags: ["finance", "operations", "ledger"],
+    maturity: "alpha",
+    icon: <LedgerGlyphIcon />,
+    restricted: true
   }
 ];

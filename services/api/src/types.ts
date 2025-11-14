@@ -90,3 +90,69 @@ export interface UserProfile {
   createdAt: string;
   updatedAt: string;
 }
+
+export type HarmonyLedgerEntryType =
+  | "DONATION"
+  | "INCOME"
+  | "EXPENSE"
+  | "REIMBURSEMENT";
+
+export interface HarmonyLedgerEntry {
+  entryId: string;
+  type: HarmonyLedgerEntryType;
+  amount: number;
+  currency: string;
+  description?: string;
+  source?: string;
+  category?: string;
+  notes?: string;
+  memberName?: string;
+  groupId?: string;
+  groupName?: string;
+  recordedAt: string;
+  recordedBy: string;
+  recordedByName?: string;
+}
+
+export interface HarmonyLedgerAccessRecord {
+  accessId: string;
+  userId?: string;
+  email?: string;
+  displayName?: string;
+  isAdmin: boolean;
+  addedAt: string;
+  addedBy: string;
+  addedByName?: string;
+}
+
+export interface HarmonyLedgerGroup {
+  groupId: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface HarmonyLedgerUnallocatedSummary {
+  donations: number;
+  income: number;
+  expenses: number;
+  reimbursements: number;
+  transfersIn: number;
+  transfersOut: number;
+  net: number;
+}
+
+export interface HarmonyLedgerTransfer {
+  transferId: string;
+  amount: number;
+  currency: string;
+  fromGroupId?: string;
+  fromGroupName?: string;
+  toGroupId?: string;
+  toGroupName?: string;
+  note?: string;
+  createdAt: string;
+  createdBy: string;
+  createdByName?: string;
+}

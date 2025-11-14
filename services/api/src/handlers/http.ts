@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda";
 import { TripService } from "../services/tripService.js";
 import { UserService } from "../services/userService.js";
+import { HarmonyLedgerService } from "../services/harmonyLedgerService.js";
 import { getAuthContext } from "../auth.js";
 import {
   handleError,
@@ -9,9 +10,11 @@ import {
   preflightResponse,
   corsHeaders
 } from "../lib/http.js";
+import { ValidationError } from "../lib/errors.js";
 
 const tripService = new TripService();
 const userService = new UserService();
+const harmonyLedgerService = new HarmonyLedgerService();
 const ok = (body: unknown, origin: string): APIGatewayProxyResultV2 =>
   json(200, body, origin);
 const created = (body: unknown, origin: string): APIGatewayProxyResultV2 =>
@@ -65,6 +68,56 @@ export const handler = async (
         auth
       );
       return ok({ users }, origin);
+    }
+
+    if (path === "/harmony-ledger/access" && method === "GET") {
+      const response = await harmonyLedgerService.getAccessOverview(auth);
+      return ok(response, origin);
+    }
+
+    if (path === "/harmony-ledger/access" && method === "POST") {
+      const body = parseBody(event);
+      const record = await harmonyLedgerService.addAccess(body, auth);
+      return created(record, origin);
+    }
+
+    const harmonyAccessMatch = path.match(/^\/harmony-ledger\/access\/([^/]+)$/);
+    if (harmonyAccessMatch && method === "DELETE") {
+      await harmonyLedgerService.removeAccess(harmonyAccessMatch[1], auth);
+      return noContent(origin);
+    }
+
+    if (path === "/harmony-ledger/groups" && method === "GET") {
+      const groups = await harmonyLedgerService.listGroups(auth);
+      return ok({ groups }, origin);
+    }
+
+    if (path === "/harmony-ledger/entries" && method === "GET") {
+      const data = await harmonyLedgerService.getEntries(auth);
+      return ok(data, origin);
+    }
+
+    if (path === "/harmony-ledger/entries" && method === "POST") {
+      const body = parseBody(event);
+      const entry = await harmonyLedgerService.createEntry(body, auth);
+      return created(entry, origin);
+    }
+
+    const harmonyEntryMatch = path.match(/^\/harmony-ledger\/entries\/([^/]+)$/);
+    if (harmonyEntryMatch && method === "PATCH") {
+      const entryId = decodeURIComponent(harmonyEntryMatch[1]);
+      const body = parseBody(event);
+      if (!body) {
+        return handleError(new ValidationError("Request body required"), origin);
+      }
+      const entry = await harmonyLedgerService.updateEntryGroup(entryId, body, auth);
+      return ok(entry, origin);
+    }
+
+    if (path === "/harmony-ledger/transfers" && method === "POST") {
+      const body = parseBody(event);
+      const transfer = await harmonyLedgerService.createTransfer(body, auth);
+      return created(transfer, origin);
     }
 
     if (method === "GET" && path === "/trips") {

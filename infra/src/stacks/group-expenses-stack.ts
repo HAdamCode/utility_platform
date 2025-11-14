@@ -280,6 +280,13 @@ export class GroupExpensesStack extends Stack {
       authorizer
     });
 
+    httpApi.addRoutes({
+      path: "/harmony-ledger/{proxy+}",
+      methods: [HttpMethod.GET, HttpMethod.POST, HttpMethod.DELETE, HttpMethod.PATCH],
+      integration: httpIntegration,
+      authorizer
+    });
+
     new CfnOutput(this, "ApiEndpoint", {
       value: httpApi.apiEndpoint
     });
