@@ -2,6 +2,7 @@ import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import HarmonySubNav from "../components/HarmonySubNav";
+import UserSelect from "../components/UserSelect";
 import {
   HarmonyLedgerAccessRecord,
   HarmonyLedgerAccessResponse,
@@ -101,11 +102,8 @@ const HarmonyLedgerPage = () => {
   });
   const [menuEntryId, setMenuEntryId] = useState<string | null>(null);
   const [menuTransferId, setMenuTransferId] = useState<string | null>(null);
-  const [accessForm, setAccessForm] = useState({
-    email: "",
-    displayName: "",
-    isAdmin: false
-  });
+  const [selectedUserId, setSelectedUserId] = useState<string>("");
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const entriesQuery = useQuery({
     queryKey: ["harmony-ledger", "entries"],
@@ -135,7 +133,8 @@ const HarmonyLedgerPage = () => {
       api.post<HarmonyLedgerAccessRecord>("/harmony-ledger/access", payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["harmony-ledger", "access"] });
-      setAccessForm({ email: "", displayName: "", isAdmin: false });
+      setSelectedUserId("");
+      setIsAdmin(false);
       setAccessError(null);
     },
     onError: (error: unknown) => {
@@ -303,14 +302,13 @@ const HarmonyLedgerPage = () => {
   const handleAccessSubmit = (event: FormEvent) => {
     event.preventDefault();
     setAccessError(null);
-    if (!accessForm.email.trim()) {
-      setAccessError("Email is required");
+    if (!selectedUserId) {
+      setAccessError("Select a person to add");
       return;
     }
     addAccessMutation.mutate({
-      email: accessForm.email.trim(),
-      displayName: accessForm.displayName.trim() || undefined,
-      isAdmin: accessForm.isAdmin
+      userId: selectedUserId,
+      isAdmin
     });
   };
 
@@ -384,31 +382,16 @@ const HarmonyLedgerPage = () => {
         )}
         <hr />
         <form onSubmit={handleAccessSubmit} className="list">
-          <div className="input-group">
-            <label htmlFor="access-email">Email</label>
-            <input
-              id="access-email"
-              type="email"
-              required
-              value={accessForm.email}
-              onChange={(event) => setAccessForm((prev) => ({ ...prev, email: event.target.value }))}
-              disabled={!data.isAdmin}
-            />
-          </div>
-          <div className="input-group">
-            <label htmlFor="access-display">Display name (optional)</label>
-            <input
-              id="access-display"
-              value={accessForm.displayName}
-              onChange={(event) => setAccessForm((prev) => ({ ...prev, displayName: event.target.value }))}
-              disabled={!data.isAdmin}
-            />
-          </div>
+          <UserSelect
+            value={selectedUserId}
+            onChange={setSelectedUserId}
+            disabled={!data.isAdmin}
+          />
           <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
             <input
               type="checkbox"
-              checked={accessForm.isAdmin}
-              onChange={(event) => setAccessForm((prev) => ({ ...prev, isAdmin: event.target.checked }))}
+              checked={isAdmin}
+              onChange={(event) => setIsAdmin(event.target.checked)}
               disabled={!data.isAdmin}
             />
             Grant admin privileges

@@ -281,6 +281,15 @@ button.ghost {
   background: rgba(56, 189, 248, 0.1);
 }
 
+.user-search-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.user-search-row input {
+  flex: 1;
+}
+
 .sub-nav {
   display: inline-flex;
   gap: 0.5rem;

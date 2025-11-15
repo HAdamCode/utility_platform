@@ -45,16 +45,10 @@ const entrySchema = z.object({
   groupId: z.string().min(1).optional()
 });
 
-const addAccessSchema = z
-  .object({
-    userId: z.string().min(1).optional(),
-    email: z.string().email().optional(),
-    displayName: z.string().min(1).optional(),
-    isAdmin: z.boolean().optional()
-  })
-  .refine((value) => Boolean(value.userId || value.email), {
-    message: "Provide a userId or email to grant access"
-  });
+const addAccessSchema = z.object({
+  userId: z.string().min(1),
+  isAdmin: z.boolean().optional()
+});
 
 const updateEntryGroupSchema = z.object({
   recordedAt: z.string().min(1),
@@ -535,43 +529,23 @@ export class HarmonyLedgerService {
     }
 
     const payload = parsed.data;
-    if (payload.userId) {
-      const existing = await this.store.findAccessByUserId(payload.userId);
-      if (existing) {
-        throw new ValidationError("This person already has access.");
-      }
+    const existing = await this.store.findAccessByUserId(payload.userId);
+    if (existing) {
+      throw new ValidationError("This person already has access.");
     }
 
-    const normalizedEmail = this.normalizeEmail(payload.email);
-    if (normalizedEmail) {
-      const existingEmail = await this.store.findAccessByEmail(normalizedEmail);
-      if (existingEmail) {
-        throw new ValidationError("That email already has access.");
-      }
+    const targetProfile = await this.userStore.getUser(payload.userId);
+    if (!targetProfile) {
+      throw new ValidationError("Unable to find that user profile.");
     }
 
-    let targetProfile: UserProfile | null = null;
-    if (payload.userId) {
-      const fetched = await this.userStore.getUser(payload.userId);
-      if (!fetched) {
-        throw new ValidationError("Unable to find that user profile.");
-      }
-      targetProfile = fetched;
-    }
-
-    const displayName =
-      payload.displayName ??
-      targetProfile?.displayName ??
-      payload.email ??
-      targetProfile?.email ??
-      "Harmony Member";
+    const displayName = targetProfile.displayName ?? targetProfile.email ?? targetProfile.userId;
 
     const accessRecord = await this.store.createAccessRecord({
       accessId: nanoid(12),
-      userId: payload.userId ?? targetProfile?.userId,
-      email: payload.email ?? targetProfile?.email,
-      normalizedEmail:
-        normalizedEmail ?? this.normalizeEmail(targetProfile?.email) ?? undefined,
+      userId: targetProfile.userId,
+      email: targetProfile.email,
+      normalizedEmail: this.normalizeEmail(targetProfile.email) ?? undefined,
       displayName,
       isAdmin: payload.isAdmin ?? false,
       addedAt: isoNow(),
