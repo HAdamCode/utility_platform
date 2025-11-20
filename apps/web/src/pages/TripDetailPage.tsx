@@ -605,6 +605,8 @@ const TripDetailPage = () => {
           members={members}
           settlements={settlements}
           pendingSettlements={pendingSettlements}
+          balances={balances}
+          settlementSuggestions={settlementSuggestions}
           onRecord={(input) => settlementMutation.mutateAsync(input)}
           isRecording={settlementMutation.isPending}
           onConfirm={(settlementId, confirmed) =>
@@ -1634,6 +1636,8 @@ interface SettlementsTabProps {
   members: TripSummary["members"];
   settlements: TripSummary["settlements"];
   pendingSettlements: TripSummary["settlements"];
+  balances: BalanceRow[];
+  settlementSuggestions: Array<{ from: string; to: string; amount: number }>;
   onRecord: (payload: {
     fromMemberId: string;
     toMemberId: string;
@@ -1656,6 +1660,8 @@ const SettlementsTab = ({
   members,
   settlements,
   pendingSettlements,
+  balances,
+  settlementSuggestions,
   onRecord,
   isRecording,
   onConfirm,
@@ -1679,6 +1685,8 @@ const SettlementsTab = ({
         onSubmit={onRecord}
         currentUserId={currentUserId}
         paymentMethods={paymentMethodsByMember}
+        memberBalances={Object.fromEntries(balances.map((balance) => [balance.memberId, balance.balance]))}
+        settlementSuggestions={settlementSuggestions}
       />
     </section>
 

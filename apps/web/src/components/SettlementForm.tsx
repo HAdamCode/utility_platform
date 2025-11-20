@@ -13,6 +13,8 @@ interface SettlementFormProps {
   isSubmitting: boolean;
   currentUserId?: string;
   paymentMethods?: Record<string, PaymentMethods>;
+  memberBalances?: Record<string, number>;
+  settlementSuggestions?: Array<{ from: string; to: string; amount: number }>;
 }
 
 const SettlementForm = ({
@@ -21,7 +23,9 @@ const SettlementForm = ({
   onSubmit,
   isSubmitting,
   currentUserId,
-  paymentMethods
+  paymentMethods,
+  memberBalances,
+  settlementSuggestions
 }: SettlementFormProps) => {
   const preferredFromMember = useMemo(() => {
     if (currentUserId && members.some((member) => member.memberId === currentUserId)) {
@@ -146,6 +150,29 @@ const SettlementForm = ({
     >;
   }, [payeeMethods]);
 
+  const balanceFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+    [currency]
+  );
+
+  const fromBalance = memberBalances?.[fromMemberId];
+  const toBalance = memberBalances?.[toMemberId];
+
+  const matchingSuggestion = useMemo(
+    () =>
+      settlementSuggestions?.find(
+        (suggestion) =>
+          suggestion.from === fromMemberId && suggestion.to === toMemberId
+      ),
+    [fromMemberId, toMemberId, settlementSuggestions]
+  );
+
   return (
     <form onSubmit={handleSubmit} className="list">
       <div className="input-group">
@@ -158,6 +185,14 @@ const SettlementForm = ({
             </option>
           ))}
         </select>
+        {fromBalance !== undefined && (
+          <p className="muted" style={{ margin: "0.3rem 0 0" }}>
+            Balance:{" "}
+            <strong style={{ color: fromBalance >= 0 ? "#4ade80" : "#f87171" }}>
+              {balanceFormatter.format(fromBalance)}
+            </strong>
+          </p>
+        )}
       </div>
 
       <div className="input-group">
@@ -170,6 +205,14 @@ const SettlementForm = ({
             </option>
           ))}
         </select>
+        {toBalance !== undefined && (
+          <p className="muted" style={{ margin: "0.3rem 0 0" }}>
+            Balance:{" "}
+            <strong style={{ color: toBalance >= 0 ? "#4ade80" : "#f87171" }}>
+              {balanceFormatter.format(toBalance)}
+            </strong>
+          </p>
+        )}
       </div>
 
       <div className="input-group">
@@ -183,6 +226,19 @@ const SettlementForm = ({
           onChange={(event) => setAmount(event.target.value)}
           onWheel={handleNumberInputWheel}
         />
+        {matchingSuggestion && (
+          <p className="muted" style={{ margin: "0.3rem 0 0", display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            Suggested: {balanceFormatter.format(matchingSuggestion.amount)}
+            <button
+              type="button"
+              className="secondary"
+              style={{ padding: "0.2rem 0.5rem" }}
+              onClick={() => setAmount(String(matchingSuggestion.amount))}
+            >
+              Use this
+            </button>
+          </p>
+        )}
       </div>
 
       <div className="input-group">
@@ -212,6 +268,41 @@ const SettlementForm = ({
       <button type="submit" className="secondary" disabled={isSubmitting}>
         {isSubmitting ? "Recording…" : "Record payment"}
       </button>
+
+      {settlementSuggestions && settlementSuggestions.length > 0 && (
+        <div className="card" style={{ padding: "0.75rem", background: "rgba(15,23,42,0.35)", border: "1px solid rgba(148,163,184,0.1)" }}>
+          <p style={{ margin: "0 0 0.5rem", fontWeight: 600 }}>Suggested payments</p>
+          <div className="list" style={{ gap: "0.5rem" }}>
+            {settlementSuggestions.map((suggestion) => (
+              <div
+                key={`${suggestion.from}-${suggestion.to}-${suggestion.amount}`}
+                className="card"
+                style={{ padding: "0.5rem 0.65rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+              >
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <span>
+                    <strong>{members.find((m) => m.memberId === suggestion.from)?.displayName ?? suggestion.from}</strong>{" "}
+                    should pay{" "}
+                    <strong>{members.find((m) => m.memberId === suggestion.to)?.displayName ?? suggestion.to}</strong>
+                  </span>
+                  <span className="muted">{balanceFormatter.format(suggestion.amount)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    handleFromChange(suggestion.from);
+                    handleToChange(suggestion.to);
+                    setAmount(String(suggestion.amount));
+                  }}
+                >
+                  Use
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </form>
   );
 };
