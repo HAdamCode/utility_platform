@@ -500,8 +500,21 @@ export class TripService {
       })
     );
 
+    const userProfiles = await getUserStore().getUsersByIds(
+      Array.from(new Set(details.members.map((member) => member.memberId)))
+    );
+    const paymentMethodsByMember = new Map(
+      userProfiles.map((profile) => [profile.userId, profile.paymentMethods])
+    );
+
+    const membersWithPayments = details.members.map((member) => ({
+      ...member,
+      paymentMethods: paymentMethodsByMember.get(member.memberId)
+    }));
+
     return {
       ...details,
+      members: membersWithPayments,
       expenses: expensesWithPreview,
       balances,
       pendingSettlements,
@@ -535,11 +548,7 @@ export class TripService {
       cleaned[key] = value === null ? null : value.trim();
     });
 
-    await getTripStore().updateMemberPaymentMethods(
-      tripId,
-      auth.userId,
-      cleaned
-    );
+    await getUserStore().updatePaymentMethods(auth.userId, cleaned);
   }
 
   async addMembers(

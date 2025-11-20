@@ -5,6 +5,7 @@ import {
   QueryCommand,
   UpdateCommand
 } from "@aws-sdk/lib-dynamodb";
+import type { UpdateCommandInput } from "@aws-sdk/lib-dynamodb";
 import { getDocumentClient } from "./dynamo.js";
 import { loadConfig } from "../config.js";
 import type { AuthContext } from "../auth.js";
@@ -23,6 +24,7 @@ const mapToProfile = (item: Record<string, unknown>): UserProfile => ({
   displayName: (item.displayName as string) || undefined,
   email: (item.email as string) || undefined,
   displayNameLower: (item.displayNameLower as string) || undefined,
+  paymentMethods: item.paymentMethods as UserProfile["paymentMethods"],
   createdAt: item.createdAt as string,
   updatedAt: item.updatedAt as string
 });
@@ -85,6 +87,7 @@ export class UserStore {
         displayName: preferredName,
         email: auth.email,
         displayNameLower: normalizedName,
+        paymentMethods: undefined,
         createdAt: now,
         updatedAt: now
       };
@@ -233,5 +236,37 @@ export class UserStore {
     }
 
     return Items.map((item) => mapToProfile(item as Record<string, unknown>));
+  }
+
+  async updatePaymentMethods(
+    userId: string,
+    methods: Partial<Record<keyof NonNullable<UserProfile["paymentMethods"]>, string | null>>
+  ): Promise<void> {
+    const names: Record<string, string> = { "#pm": "paymentMethods" };
+    const provided = Object.entries(methods).filter(
+      ([, value]) => value !== undefined
+    ) as Array<[keyof NonNullable<UserProfile["paymentMethods"]>, string | null]>;
+
+    const cleaned: Record<string, string> = {};
+    for (const [key, value] of provided) {
+      if (value === null) continue;
+      cleaned[key] = value;
+    }
+
+    const hasValues = Object.keys(cleaned).length > 0;
+
+    const params: UpdateCommandInput = {
+      TableName: this.tableName,
+      Key: { PK: userPk(userId), SK: userSk },
+      ConditionExpression: "attribute_exists(PK)",
+      UpdateExpression: hasValues ? "SET #pm = :pm" : "REMOVE #pm",
+      ExpressionAttributeNames: names
+    };
+
+    if (hasValues) {
+      params.ExpressionAttributeValues = { ":pm": cleaned };
+    }
+
+    await this.docClient.send(new UpdateCommand(params));
   }
 }

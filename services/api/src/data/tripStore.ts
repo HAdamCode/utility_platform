@@ -204,7 +204,15 @@ export class TripStore {
       email: item.email,
       addedBy: item.addedBy,
       createdAt: item.createdAt,
-      paymentMethods: item.paymentMethods
+      paymentMethods:
+        item.paymentMethods ??
+        (item.venmo || item.paypal || item.zelle
+          ? {
+              venmo: item.venmo,
+              paypal: item.paypal,
+              zelle: item.zelle
+            }
+          : undefined)
     }));
 
     const expenses: Expense[] = Items.filter(
@@ -420,16 +428,18 @@ export class TripStore {
     const removeParts: string[] = [];
     let index = 0;
 
+    names["#pm"] = "paymentMethods";
+
     (["venmo", "paypal", "zelle"] as Array<keyof PaymentMethods>).forEach((key) => {
       if (methods[key] === undefined) return;
-      const nameKey = `#${key}`;
+      const nameKey = `#pm_${key}`;
       names[nameKey] = key;
       if (methods[key] === null) {
-        removeParts.push(nameKey);
+        removeParts.push(`#pm.${nameKey}`);
       } else {
         const valueKey = `:v${index++}`;
         values[valueKey] = methods[key];
-        setParts.push(`${nameKey} = ${valueKey}`);
+        setParts.push(`#pm.${nameKey} = ${valueKey}`);
       }
     });
 
