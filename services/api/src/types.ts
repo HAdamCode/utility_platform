@@ -16,6 +16,13 @@ export interface TripMember {
   email?: string;
   addedBy: string;
   createdAt: string;
+  paymentMethods?: PaymentMethods;
+}
+
+export interface PaymentMethods {
+  venmo?: string;
+  paypal?: string;
+  zelle?: string;
 }
 
 export interface ExpenseAllocation {

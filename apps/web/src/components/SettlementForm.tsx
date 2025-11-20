@@ -1,5 +1,5 @@
 import { FormEvent, WheelEvent, useCallback, useEffect, useMemo, useState } from "react";
-import type { TripMember } from "../types";
+import type { PaymentMethods, TripMember } from "../types";
 
 interface SettlementFormProps {
   members: TripMember[];
@@ -12,9 +12,17 @@ interface SettlementFormProps {
   }) => Promise<void>;
   isSubmitting: boolean;
   currentUserId?: string;
+  paymentMethods?: Record<string, PaymentMethods>;
 }
 
-const SettlementForm = ({ members, currency, onSubmit, isSubmitting, currentUserId }: SettlementFormProps) => {
+const SettlementForm = ({
+  members,
+  currency,
+  onSubmit,
+  isSubmitting,
+  currentUserId,
+  paymentMethods
+}: SettlementFormProps) => {
   const preferredFromMember = useMemo(() => {
     if (currentUserId && members.some((member) => member.memberId === currentUserId)) {
       return currentUserId;
@@ -130,6 +138,14 @@ const SettlementForm = ({ members, currency, onSubmit, isSubmitting, currentUser
     setToManuallySelected(true);
   };
 
+  const payeeMethods = paymentMethods?.[toMemberId];
+  const availableMethodEntries = useMemo(() => {
+    if (!payeeMethods) return [];
+    return Object.entries(payeeMethods).filter(([, value]) => Boolean(value)) as Array<
+      [keyof PaymentMethods, string]
+    >;
+  }, [payeeMethods]);
+
   return (
     <form onSubmit={handleSubmit} className="list">
       <div className="input-group">
@@ -173,6 +189,23 @@ const SettlementForm = ({ members, currency, onSubmit, isSubmitting, currentUser
         <label>Note (optional)</label>
         <input value={note} onChange={(event) => setNote(event.target.value)} placeholder="Dinner reimbursement" />
       </div>
+
+      {availableMethodEntries.length > 0 ? (
+        <div className="card" style={{ padding: "0.75rem", background: "rgba(15,23,42,0.35)", border: "1px solid rgba(148,163,184,0.1)" }}>
+          <p style={{ margin: "0 0 0.25rem", fontWeight: 600 }}>Pay {members.find((m) => m.memberId === toMemberId)?.displayName ?? "member"} via:</p>
+          <ul style={{ margin: 0, paddingLeft: "1.1rem", color: "#e2e8f0" }}>
+            {availableMethodEntries.map(([method, value]) => (
+              <li key={method} style={{ margin: "0.15rem 0" }}>
+                <strong style={{ textTransform: "capitalize" }}>{method}:</strong> {value}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="muted" style={{ margin: 0 }}>
+          No payment methods saved for the recipient yet.
+        </p>
+      )}
 
       {error && <p style={{ color: "#fda4af" }}>{error}</p>}
 

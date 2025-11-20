@@ -178,6 +178,11 @@ export const handler = async (
         const members = await tripService.addMembers(tripId, body, auth);
         return created({ members }, origin);
       }
+      if (remainder === "/members/payment-methods" && method === "PATCH") {
+        const body = parseBody(event);
+        await tripService.updatePaymentMethods(tripId, body, auth);
+        return noContent(origin);
+      }
       const memberMatch = remainder.match(/^\/members\/([^/]+)$/);
       if (memberMatch && method === "DELETE") {
         const memberId = decodeURIComponent(memberMatch[1]);

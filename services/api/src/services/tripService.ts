@@ -10,7 +10,8 @@ import {
   Receipt,
   Settlement,
   UserProfile,
-  type TextractExtraction
+  type TextractExtraction,
+  PaymentMethods
 } from "../types.js";
 import { ValidationError, ForbiddenError } from "../lib/errors.js";
 import type { AuthContext } from "../auth.js";
@@ -137,6 +138,22 @@ const settlementSchema = z.object({
 const confirmSettlementSchema = z.object({
   confirmed: z.boolean()
 });
+
+const paymentMethodField = z.union([z.string().trim().min(1), z.null()]).optional();
+
+const paymentMethodsSchema = z
+  .object({
+    venmo: paymentMethodField,
+    paypal: paymentMethodField,
+    zelle: paymentMethodField
+  })
+  .refine(
+    (methods) =>
+      methods.venmo !== undefined ||
+      methods.paypal !== undefined ||
+      methods.zelle !== undefined,
+    { message: "No payment methods provided" }
+  );
 
 const ensureMember = (members: TripMember[], memberId: string) => {
   const member = members.find((m) => m.memberId === memberId);
@@ -490,6 +507,39 @@ export class TripService {
       pendingSettlements,
       currentUserId: auth.userId
     };
+  }
+
+  async updatePaymentMethods(
+    tripId: string,
+    body: unknown,
+    auth: AuthContext
+  ): Promise<void> {
+    const parsed = paymentMethodsSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.message);
+    }
+
+    await ensureCurrentUserProfile(auth);
+    const details = await getTripStore().getTripDetails(tripId);
+    const isMember = details.members.some(
+      (member) => member.memberId === auth.userId
+    );
+    if (!isMember) {
+      throw new ForbiddenError("You are not part of this trip");
+    }
+
+    const cleaned: Partial<Record<keyof PaymentMethods, string | null>> = {};
+    (["venmo", "paypal", "zelle"] as Array<keyof PaymentMethods>).forEach((key) => {
+      const value = parsed.data[key];
+      if (value === undefined) return;
+      cleaned[key] = value === null ? null : value.trim();
+    });
+
+    await getTripStore().updateMemberPaymentMethods(
+      tripId,
+      auth.userId,
+      cleaned
+    );
   }
 
   async addMembers(

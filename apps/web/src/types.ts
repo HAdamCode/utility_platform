@@ -27,6 +27,7 @@ export interface TripMember {
   email?: string;
   addedBy: string;
   createdAt: string;
+  paymentMethods?: PaymentMethods;
 }
 
 export interface ExpenseAllocation {
@@ -119,6 +120,12 @@ export interface UserProfile {
   displayName?: string;
   email?: string;
   displayNameLower?: string;
+}
+
+export interface PaymentMethods {
+  venmo?: string;
+  paypal?: string;
+  zelle?: string;
 }
 
 export type HarmonyLedgerEntryType =

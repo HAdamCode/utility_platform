@@ -11,7 +11,8 @@ import type {
   Settlement,
   UserProfile,
   BalanceRow,
-  Trip
+  Trip,
+  PaymentMethods
 } from "../types";
 
 type TripTab = "overview" | "expenses" | "settlements" | "people";
@@ -31,6 +32,11 @@ type TripUpdateInput = {
   name?: string;
   startDate?: string | null;
   endDate?: string | null;
+};
+type PaymentMethodsInput = {
+  venmo?: string | null;
+  paypal?: string | null;
+  zelle?: string | null;
 };
 
 function useDebouncedValue<T>(value: T, delay: number): T {
@@ -126,6 +132,7 @@ const TripDetailPage = () => {
     endDate: ""
   });
   const [detailsMessage, setDetailsMessage] = useState<DetailsMessage | null>(null);
+  const [paymentMethodsMessage, setPaymentMethodsMessage] = useState<string | null>(null);
 
   const queryKey = useMemo(() => ["trip", tripId], [tripId]);
 
@@ -152,10 +159,10 @@ const TripDetailPage = () => {
     (tab: TripTab) => {
       setActiveTab(tab);
       if (tripId) {
-        refetch();
+        void queryClient.refetchQueries({ queryKey, type: "active" });
       }
     },
-    [refetch, tripId]
+    [queryClient, queryKey, tripId]
   );
 
   const createExpenseMutation = useMutation({
@@ -286,6 +293,29 @@ const TripDetailPage = () => {
     }
   });
 
+  const savePaymentMethodsMutation = useMutation({
+    mutationFn: (payload: PaymentMethodsInput) => {
+      if (!tripId) {
+        throw new Error("Trip not found");
+      }
+      return api.patch<void>(`/trips/${tripId}/members/payment-methods`, payload);
+    },
+    onMutate: () => {
+      setPaymentMethodsMessage(null);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey });
+      setPaymentMethodsMessage("Payment methods saved");
+    },
+    onError: (err: unknown) => {
+      if (err instanceof ApiError) {
+        setPaymentMethodsMessage(err.message);
+      } else {
+        setPaymentMethodsMessage("Failed to save payment methods");
+      }
+    }
+  });
+
   const handleSearchTermChange = (value: string) => {
     setMemberSearchTerm(value);
     setMemberFeedback(null);
@@ -321,12 +351,22 @@ const TripDetailPage = () => {
       return err instanceof ApiError ? err.message : "Unable to search users.";
     }
 
-    if (memberSearchResults.length === 0) {
+  if (memberSearchResults.length === 0) {
       return "No matches yet.";
     }
 
     return null;
   }, [memberSearchTerm, shouldSearch, userSearchQuery.isFetching, userSearchQuery.isError, userSearchQuery.error, memberSearchResults.length]);
+
+  const paymentMethodsByMember = useMemo(() => {
+    if (!data?.members) return {} as Record<string, PaymentMethods>;
+    return Object.fromEntries(
+      data.members.map((member) => [
+        member.memberId,
+        member.paymentMethods ?? {}
+      ])
+    );
+  }, [data?.members]);
 
   const membersById = useMemo(() => {
     if (!data?.members) return {} as Record<string, string>;
@@ -353,6 +393,13 @@ const TripDetailPage = () => {
         maximumFractionDigits: 2
       }),
     [data?.trip?.currency]
+  );
+
+  const handleSavePaymentMethods = useCallback(
+    (methods: PaymentMethodsInput) => {
+      savePaymentMethodsMutation.mutate(methods);
+    },
+    [savePaymentMethodsMutation]
   );
 
   const handleStartEditingDetails = () => {
@@ -571,6 +618,7 @@ const TripDetailPage = () => {
           deletePending={deleteSettlementMutation.isPending}
           deletingSettlementId={deleteSettlementMutation.variables}
           currentUserId={effectiveCurrentUserId}
+          paymentMethodsByMember={paymentMethodsByMember}
         />
       )}
 
@@ -587,13 +635,17 @@ const TripDetailPage = () => {
           canManageMembers={canManageMembers}
           ownerId={trip.ownerId}
           onRemoveMember={(memberId) =>
-        removeMemberMutation.mutateAsync(memberId)
-      }
-      removeLoading={removeMemberMutation.isPending}
-      removingMemberId={removeMemberMutation.variables}
-      currentUserId={effectiveCurrentUserId}
-      membersById={membersById}
-    />
+            removeMemberMutation.mutateAsync(memberId)
+          }
+          removeLoading={removeMemberMutation.isPending}
+          removingMemberId={removeMemberMutation.variables}
+          currentUserId={effectiveCurrentUserId}
+          membersById={membersById}
+          paymentMethodsByMember={paymentMethodsByMember}
+          onSavePaymentMethods={handleSavePaymentMethods}
+          paymentMethodsMessage={paymentMethodsMessage}
+          savingPaymentMethods={savePaymentMethodsMutation.isPending}
+        />
       )}
     </div>
   );
@@ -1596,6 +1648,7 @@ interface SettlementsTabProps {
   deletePending: boolean;
   deletingSettlementId?: string;
   currentUserId?: string;
+  paymentMethodsByMember: Record<string, PaymentMethods>;
 }
 
 const SettlementsTab = ({
@@ -1611,7 +1664,8 @@ const SettlementsTab = ({
   onDelete,
   deletePending,
   deletingSettlementId,
-  currentUserId
+  currentUserId,
+  paymentMethodsByMember
 }: SettlementsTabProps) => (
   <div className="grid-two">
     <section className="card">
@@ -1624,6 +1678,7 @@ const SettlementsTab = ({
         isSubmitting={isRecording}
         onSubmit={onRecord}
         currentUserId={currentUserId}
+        paymentMethods={paymentMethodsByMember}
       />
     </section>
 
@@ -1715,6 +1770,10 @@ interface PeopleTabProps {
   removingMemberId?: string;
   currentUserId?: string;
   membersById: Record<string, string>;
+  paymentMethodsByMember: Record<string, PaymentMethods>;
+  onSavePaymentMethods: (methods: PaymentMethodsInput) => void;
+  paymentMethodsMessage: string | null;
+  savingPaymentMethods: boolean;
 }
 
 const PeopleTab = ({
@@ -1732,125 +1791,235 @@ const PeopleTab = ({
   removeLoading,
   removingMemberId,
   currentUserId,
-  membersById
-}: PeopleTabProps) => (
-  <div className="grid-two">
-    <section className="card">
-      <div className="section-title">
-        <h2>People</h2>
-      </div>
-      <div className="list">
-        <div className="input-group">
-          <label htmlFor="member-search">Find people</label>
-          <input
-            id="member-search"
-            value={memberSearchTerm}
-            onChange={(event) => onMemberSearchTermChange(event.target.value)}
-            placeholder="Search by name or email"
-          />
-        </div>
-        {searchMessage && <p className="muted">{searchMessage}</p>}
-        {feedbackMessage && (
-          <p
-            style={{
-              color: /fail|cannot|error/i.test(feedbackMessage)
-                ? "#f87171"
-                : "#4ade80"
-            }}
-          >
-            {feedbackMessage}
-          </p>
-        )}
-        {searchResults.length > 0 && (
-          <div className="list">
-            {searchResults.map((user) => {
-              const alreadyMember = members.some((member) => member.memberId === user.userId);
-              const label = `${user.displayName ?? user.email ?? user.userId}${user.userId === currentUserId ? " (you)" : ""}`;
-              return (
-                <div
-                  key={user.userId}
-                  className="card"
-                  style={{ padding: "0.75rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
-                >
-                  <div>
-                    <strong>{label}</strong>
-                    {user.email && (
-                      <p className="muted" style={{ margin: "0.2rem 0 0" }}>
-                        {user.email}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    className="secondary"
-                    disabled={addLoading || alreadyMember}
-                    onClick={() => onAddMember(user.userId)}
-                  >
-                    {alreadyMember ? "Already added" : "Add"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </section>
+  membersById,
+  paymentMethodsByMember,
+  onSavePaymentMethods,
+  paymentMethodsMessage,
+  savingPaymentMethods
+}: PeopleTabProps) => {
+  const editableMemberId = useMemo(
+    () => members.find((member) => member.memberId === currentUserId)?.memberId,
+    [members, currentUserId]
+  );
 
-    <section className="card">
-      <div className="section-title">
-        <h2>Trip Members</h2>
-        <span className="muted">{members.length}</span>
-      </div>
-      <div className="list">
-        {members.map((member) => {
-          const canRemove =
-            canManageMembers && member.memberId !== ownerId;
-          const label = membersById[member.memberId] ?? member.displayName ?? member.email ?? member.memberId;
-          return (
-            <div
-              key={member.memberId}
-              className="card"
+  const [methodDraft, setMethodDraft] = useState<PaymentMethods>({});
+
+  useEffect(() => {
+    if (!editableMemberId) {
+      setMethodDraft({});
+      return;
+    }
+    setMethodDraft(paymentMethodsByMember[editableMemberId] ?? {});
+  }, [editableMemberId, paymentMethodsByMember]);
+
+  const handleSave = () => {
+    if (!editableMemberId) return;
+    const payload: PaymentMethodsInput = {
+      venmo: (methodDraft.venmo ?? "").trim() || null,
+      paypal: (methodDraft.paypal ?? "").trim() || null,
+      zelle: (methodDraft.zelle ?? "").trim() || null
+    };
+    onSavePaymentMethods(payload);
+  };
+
+  return (
+    <div className="grid-two">
+      <section className="card">
+        <div className="section-title">
+          <h2>People</h2>
+        </div>
+        <div className="list">
+          <div className="input-group">
+            <label htmlFor="member-search">Find people</label>
+            <input
+              id="member-search"
+              value={memberSearchTerm}
+              onChange={(event) => onMemberSearchTermChange(event.target.value)}
+              placeholder="Search by name or email"
+            />
+          </div>
+          {searchMessage && <p className="muted">{searchMessage}</p>}
+          {feedbackMessage && (
+            <p
               style={{
-                padding: "0.75rem 1rem",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "1rem"
+                color: /fail|cannot|error/i.test(feedbackMessage)
+                  ? "#f87171"
+                  : "#4ade80"
               }}
             >
-              <div>
-                <strong>{label}</strong>
-                {member.email && (
-                  <p className="muted" style={{ margin: "0.2rem 0 0" }}>
-                    {member.email}
+              {feedbackMessage}
+            </p>
+          )}
+          {searchResults.length > 0 && (
+            <div className="list">
+              {searchResults.map((user) => {
+                const alreadyMember = members.some((member) => member.memberId === user.userId);
+                const label = `${user.displayName ?? user.email ?? user.userId}${user.userId === currentUserId ? " (you)" : ""}`;
+                return (
+                  <div
+                    key={user.userId}
+                    className="card"
+                    style={{ padding: "0.75rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                  >
+                    <div>
+                      <strong>{label}</strong>
+                      {user.email && (
+                        <p className="muted" style={{ margin: "0.2rem 0 0" }}>
+                          {user.email}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      className="secondary"
+                      disabled={addLoading || alreadyMember}
+                      onClick={() => onAddMember(user.userId)}
+                    >
+                      {alreadyMember ? "Already added" : "Add"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="card" style={{ padding: "0.75rem", gap: "0.6rem", display: "flex", flexDirection: "column" }}>
+            <div className="section-title" style={{ marginBottom: 0 }}>
+              <h3 style={{ margin: 0 }}>Payment methods</h3>
+              <span className="muted">Visible to this group</span>
+            </div>
+            <p className="muted" style={{ margin: 0 }}>
+              You can only edit your own payment methods. Others will see them when recording a settlement to you.
+            </p>
+            {!editableMemberId ? (
+              <p className="muted" style={{ margin: 0 }}>Join the trip to add your payment methods.</p>
+            ) : (
+              <>
+                <div className="input-group">
+                  <label>Venmo</label>
+                  <input
+                    value={methodDraft.venmo ?? ""}
+                    onChange={(event) =>
+                      setMethodDraft((current) => ({ ...current, venmo: event.target.value }))
+                    }
+                    placeholder="@username"
+                  />
+                </div>
+                <div className="input-group">
+                  <label>PayPal</label>
+                  <input
+                    value={methodDraft.paypal ?? ""}
+                    onChange={(event) =>
+                      setMethodDraft((current) => ({ ...current, paypal: event.target.value }))
+                    }
+                    placeholder="email@example.com"
+                  />
+                </div>
+                <div className="input-group">
+                  <label>Zelle</label>
+                  <input
+                    value={methodDraft.zelle ?? ""}
+                    onChange={(event) =>
+                      setMethodDraft((current) => ({ ...current, zelle: event.target.value }))
+                    }
+                    placeholder="phone or email"
+                  />
+                </div>
+                {paymentMethodsMessage && (
+                  <p
+                    style={{
+                      margin: 0,
+                      color: /fail|cannot|error|unable|invalid/i.test(paymentMethodsMessage)
+                        ? "#f87171"
+                        : "#4ade80"
+                    }}
+                  >
+                    {paymentMethodsMessage}
                   </p>
                 )}
-              </div>
-              {canRemove && (
                 <button
+                  type="button"
                   className="secondary"
-                  disabled={
-                    removeLoading && removingMemberId === member.memberId
-                  }
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        `Remove ${label} from this trip?`
-                      )
-                    ) {
-                      return;
-                    }
-                    onRemoveMember(member.memberId).catch(() => {});
-                  }}
+                  onClick={handleSave}
+                  disabled={savingPaymentMethods}
                 >
-                  Remove
+                  {savingPaymentMethods ? "Saving…" : "Save your methods"}
                 </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  </div>
-);
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="section-title">
+          <h2>Trip Members</h2>
+          <span className="muted">{members.length}</span>
+        </div>
+        <div className="list">
+          {members.map((member) => {
+            const canRemove =
+              canManageMembers && member.memberId !== ownerId;
+            const label = membersById[member.memberId] ?? member.displayName ?? member.email ?? member.memberId;
+            const methods = paymentMethodsByMember[member.memberId];
+            const hasMethods = Boolean(
+              methods && Object.values(methods).some((value) => typeof value === "string" && value.trim())
+            );
+            return (
+              <div
+                key={member.memberId}
+                className="card"
+                style={{
+                  padding: "0.75rem 1rem",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "1rem"
+                }}
+              >
+                <div style={{ flex: 1 }}>
+                  <strong>{label}</strong>
+                  {member.email && (
+                    <p className="muted" style={{ margin: "0.2rem 0 0" }}>
+                      {member.email}
+                    </p>
+                  )}
+                  {hasMethods && methods && (
+                    <p className="muted" style={{ margin: "0.4rem 0 0", fontSize: "0.85rem" }}>
+                      {methods.venmo && <span>Venmo: {methods.venmo} </span>}
+                      {methods.paypal && <span>PayPal: {methods.paypal} </span>}
+                      {methods.zelle && <span>Zelle: {methods.zelle}</span>}
+                    </p>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  {canRemove && (
+                    <button
+                      className="secondary"
+                      disabled={
+                        removeLoading && removingMemberId === member.memberId
+                      }
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Remove ${label} from this trip?`
+                          )
+                        ) {
+                          return;
+                        }
+                        onRemoveMember(member.memberId).catch(() => {});
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+};
 
 export default TripDetailPage;

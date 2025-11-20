@@ -9,7 +9,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { getDocumentClient } from "./dynamo.js";
 import { loadConfig } from "../config.js";
-import { Trip, TripMember, Expense, Receipt, Settlement } from "../types.js";
+import { Trip, TripMember, Expense, Receipt, Settlement, PaymentMethods } from "../types.js";
 import { NotFoundError } from "../lib/errors.js";
 
 const keys = {
@@ -203,7 +203,8 @@ export class TripStore {
       displayName: item.displayName,
       email: item.email,
       addedBy: item.addedBy,
-      createdAt: item.createdAt
+      createdAt: item.createdAt,
+      paymentMethods: item.paymentMethods
     }));
 
     const expenses: Expense[] = Items.filter(
@@ -392,6 +393,56 @@ export class TripStore {
     }
     if (removeParts.length) {
       expressions.push(`REMOVE ${removeParts.join(", ")}`);
+    }
+
+    await this.docClient.send(
+      new UpdateCommand({
+        TableName: this.tableName,
+        Key: {
+          PK: keys.tripPk(tripId),
+          SK: keys.memberSk(memberId)
+        },
+        UpdateExpression: expressions.join(" "),
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values
+      })
+    );
+  }
+
+  async updateMemberPaymentMethods(
+    tripId: string,
+    memberId: string,
+    methods: Partial<Record<keyof PaymentMethods, string | null>>
+  ): Promise<void> {
+    const names: Record<string, string> = {};
+    const values: Record<string, unknown> = {};
+    const setParts: string[] = [];
+    const removeParts: string[] = [];
+    let index = 0;
+
+    (["venmo", "paypal", "zelle"] as Array<keyof PaymentMethods>).forEach((key) => {
+      if (methods[key] === undefined) return;
+      const nameKey = `#${key}`;
+      names[nameKey] = key;
+      if (methods[key] === null) {
+        removeParts.push(nameKey);
+      } else {
+        const valueKey = `:v${index++}`;
+        values[valueKey] = methods[key];
+        setParts.push(`${nameKey} = ${valueKey}`);
+      }
+    });
+
+    const expressions: string[] = [];
+    if (setParts.length) {
+      expressions.push(`SET ${setParts.join(", ")}`);
+    }
+    if (removeParts.length) {
+      expressions.push(`REMOVE ${removeParts.join(", ")}`);
+    }
+
+    if (!expressions.length) {
+      return;
     }
 
     await this.docClient.send(
