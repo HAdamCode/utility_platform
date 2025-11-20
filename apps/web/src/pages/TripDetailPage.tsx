@@ -344,6 +344,17 @@ const TripDetailPage = () => {
     [data?.balances]
   );
 
+  const settlementAmountFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: data?.trip?.currency ?? "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+    [data?.trip?.currency]
+  );
+
   const handleStartEditingDetails = () => {
     syncDetailsFormFromTrip();
     setDetailsMessage(null);
@@ -386,16 +397,6 @@ const TripDetailPage = () => {
   const { trip, members, expenses, receipts, balances, settlements, pendingSettlements } = data;
   const effectiveCurrentUserId = loggedInUserId ?? data.currentUserId;
   const canManageMembers = trip.ownerId === effectiveCurrentUserId;
-  const settlementAmountFormatter = useMemo(
-    () =>
-      new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: trip.currency,
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }),
-    [trip.currency]
-  );
 
   return (
     <div className="trip-detail">
