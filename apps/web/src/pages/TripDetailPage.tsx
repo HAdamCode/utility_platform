@@ -1672,95 +1672,108 @@ const SettlementsTab = ({
   deletingSettlementId,
   currentUserId,
   paymentMethodsByMember
-}: SettlementsTabProps) => (
-  <div className="grid-two">
-    <section className="card">
-      <div className="section-title">
-        <h2>Record Settlement</h2>
-      </div>
-      <SettlementForm
-        members={members}
-        currency={currency}
-        isSubmitting={isRecording}
-        onSubmit={onRecord}
-        currentUserId={currentUserId}
-        paymentMethods={paymentMethodsByMember}
-        memberBalances={Object.fromEntries(balances.map((balance) => [balance.memberId, balance.balance]))}
-        settlementSuggestions={settlementSuggestions}
-      />
-    </section>
+}: SettlementsTabProps) => {
+  const settlementAmountFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }),
+    [currency]
+  );
 
-    <section className="card" style={{ gridColumn: "1 / -1" }}>
-      <div className="section-title">
-        <h2>Settlement History</h2>
-        <span className="muted">{settlements.length} recorded</span>
-      </div>
-      {settlements.length === 0 ? (
-        <p className="muted">No settlements recorded yet.</p>
-      ) : (
-        <div className="list">
-          {settlements.map((settlement) => {
-            const from = membersById[settlement.fromMemberId] ?? settlement.fromMemberId;
-            const to = membersById[settlement.toMemberId] ?? settlement.toMemberId;
-            return (
-              <div key={settlement.settlementId} className="card" style={{ padding: "1rem 1.25rem" }}>
-                <p style={{ margin: "0 0 0.25rem" }}>
-                  <strong>{from}</strong> paid <strong>{to}</strong>
-                </p>
-                <p className="muted" style={{ margin: 0 }}>
-                  {settlementAmountFormatter.format(settlement.amount)}
-                </p>
-                {settlement.note && (
-                  <p className="muted" style={{ margin: "0.4rem 0 0" }}>
-                    {settlement.note}
+  return (
+    <div className="grid-two">
+      <section className="card">
+        <div className="section-title">
+          <h2>Record Settlement</h2>
+        </div>
+        <SettlementForm
+          members={members}
+          currency={currency}
+          isSubmitting={isRecording}
+          onSubmit={onRecord}
+          currentUserId={currentUserId}
+          paymentMethods={paymentMethodsByMember}
+          memberBalances={Object.fromEntries(balances.map((balance) => [balance.memberId, balance.balance]))}
+          settlementSuggestions={settlementSuggestions}
+        />
+      </section>
+
+      <section className="card" style={{ gridColumn: "1 / -1" }}>
+        <div className="section-title">
+          <h2>Settlement History</h2>
+          <span className="muted">{settlements.length} recorded</span>
+        </div>
+        {settlements.length === 0 ? (
+          <p className="muted">No settlements recorded yet.</p>
+        ) : (
+          <div className="list">
+            {settlements.map((settlement) => {
+              const from = membersById[settlement.fromMemberId] ?? settlement.fromMemberId;
+              const to = membersById[settlement.toMemberId] ?? settlement.toMemberId;
+              return (
+                <div key={settlement.settlementId} className="card" style={{ padding: "1rem 1.25rem" }}>
+                  <p style={{ margin: "0 0 0.25rem" }}>
+                    <strong>{from}</strong> paid <strong>{to}</strong>
                   </p>
-                )}
-                <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <span className="pill">
-                    Status: {settlement.confirmedAt ? "confirmed" : "pending"}
-                  </span>
-                  {!settlement.confirmedAt && (
+                  <p className="muted" style={{ margin: 0 }}>
+                    {settlementAmountFormatter.format(settlement.amount)}
+                  </p>
+                  {settlement.note && (
+                    <p className="muted" style={{ margin: "0.4rem 0 0" }}>
+                      {settlement.note}
+                    </p>
+                  )}
+                  <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                    <span className="pill">
+                      Status: {settlement.confirmedAt ? "confirmed" : "pending"}
+                    </span>
+                    {!settlement.confirmedAt && (
+                      <button
+                        className="secondary"
+                        disabled={confirmPending}
+                        onClick={() => onConfirm(settlement.settlementId, true)}
+                      >
+                        Mark as paid
+                      </button>
+                    )}
                     <button
                       className="secondary"
-                      disabled={confirmPending}
-                      onClick={() => onConfirm(settlement.settlementId, true)}
-                    >
-                      Mark as paid
-                    </button>
-                  )}
-                  <button
-                    className="secondary"
-                    disabled={
-                      deletePending &&
-                      deletingSettlementId === settlement.settlementId
-                    }
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          `Delete settlement from ${from} to ${to}?`
-                        )
-                      ) {
-                        return;
+                      disabled={
+                        deletePending &&
+                        deletingSettlementId === settlement.settlementId
                       }
-                      onDelete(settlement.settlementId).catch(() => {});
-                    }}
-                  >
-                    Delete settlement
-                  </button>
+                      onClick={() => {
+                        if (
+                          !window.confirm(
+                            `Delete settlement from ${from} to ${to}?`
+                          )
+                        ) {
+                          return;
+                        }
+                        onDelete(settlement.settlementId).catch(() => {});
+                      }}
+                    >
+                      Delete settlement
+                    </button>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {pendingSettlements.length > 0 && (
-        <p className="muted" style={{ marginTop: "1rem" }}>
-          Pending settlements will reduce balances once confirmed.
-        </p>
-      )}
-    </section>
-  </div>
-);
+              );
+            })}
+          </div>
+        )}
+        {pendingSettlements.length > 0 && (
+          <p className="muted" style={{ marginTop: "1rem" }}>
+            Pending settlements will reduce balances once confirmed.
+          </p>
+        )}
+      </section>
+    </div>
+  );
+};
 
 interface PeopleTabProps {
   members: TripSummary["members"];
