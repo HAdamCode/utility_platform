@@ -17,7 +17,9 @@ import { modules } from "./modules/registry";
 import { WorkspaceBadgeIcon } from "./components/icons/UtilityIcons";
 import HarmonyLedgerPage from "./pages/HarmonyLedgerPage";
 import HarmonyOverviewPage from "./pages/HarmonyOverviewPage";
+import StackTimePage from "./pages/StackTimePage";
 import { useHarmonyLedgerAccess } from "./modules/useHarmonyLedgerAccess";
+import { useStackTimeAccess } from "./modules/useStackTimeAccess";
 
 const queryClient = new QueryClient();
 const GroupExpensesModule = () => <Outlet />;
@@ -36,6 +38,7 @@ interface AppContentProps {
 
 const AppContent = ({ user, signOut }: AppContentProps) => {
   const { data: harmonyAccess } = useHarmonyLedgerAccess();
+  const { data: stackTimeAccess } = useStackTimeAccess();
 
   const availableModules = useMemo(() => {
     return modules.filter((module) => {
@@ -45,9 +48,12 @@ const AppContent = ({ user, signOut }: AppContentProps) => {
       if (module.id === "harmony-ledger") {
         return harmonyAccess?.allowed ?? false;
       }
+      if (module.id === "stack-time") {
+        return stackTimeAccess?.allowed ?? false;
+      }
       return true;
     });
-  }, [harmonyAccess?.allowed]);
+  }, [harmonyAccess?.allowed, stackTimeAccess?.allowed]);
 
   const fullName = [user?.attributes?.given_name, user?.attributes?.family_name]
     .filter(Boolean)
@@ -105,6 +111,7 @@ const AppContent = ({ user, signOut }: AppContentProps) => {
             <Route path="overview" element={<HarmonyOverviewPage />} />
             <Route path="ledger" element={<HarmonyLedgerPage />} />
           </Route>
+          <Route path="/stack-time" element={<StackTimePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

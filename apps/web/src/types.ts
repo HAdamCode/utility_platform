@@ -236,3 +236,66 @@ export interface HarmonyLedgerAccessResponse {
   currentAccessId?: string;
   members?: HarmonyLedgerAccessRecord[];
 }
+
+// Stack Time types
+
+export interface StackTimeProject {
+  projectId: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface StackTimeEntry {
+  entryId: string;
+  userId: string;
+  userDisplayName?: string;
+  projectId: string;
+  projectName?: string;
+  date: string;
+  hours: number;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  createdByName?: string;
+}
+
+export interface StackTimeAccessRecord {
+  accessId: string;
+  userId?: string;
+  email?: string;
+  displayName?: string;
+  isAdmin: boolean;
+  addedAt: string;
+  addedBy: string;
+  addedByName?: string;
+}
+
+export interface StackTimeAccessResponse {
+  allowed: boolean;
+  isAdmin: boolean;
+  currentAccessId?: string;
+  members?: StackTimeAccessRecord[];
+}
+
+export interface StackTimeEntriesResponse {
+  entries: StackTimeEntry[];
+  totalHours: number;
+}
+
+export interface StackTimeReportByProject {
+  projectId: string;
+  projectName: string;
+  totalHours: number;
+  entryCount: number;
+}
+
+export interface StackTimeReportByPerson {
+  userId: string;
+  displayName: string;
+  totalHours: number;
+  entryCount: number;
+  byProject: StackTimeReportByProject[];
+}

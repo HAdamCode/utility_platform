@@ -176,3 +176,39 @@ export interface HarmonyLedgerTransfer {
   createdBy: string;
   createdByName?: string;
 }
+
+// Stack Time Tracking types
+
+export interface StackTimeProject {
+  projectId: string;
+  name: string;
+  isActive: boolean;
+  createdAt: string;
+  createdBy: string;
+}
+
+export interface StackTimeEntry {
+  entryId: string;
+  userId: string;
+  userDisplayName?: string;
+  projectId: string;
+  projectName?: string;
+  date: string; // YYYY-MM-DD
+  hours: number;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  createdByName?: string;
+}
+
+export interface StackTimeAccessRecord {
+  accessId: string;
+  userId?: string;
+  email?: string;
+  displayName?: string;
+  isAdmin: boolean;
+  addedAt: string;
+  addedBy: string;
+  addedByName?: string;
+}

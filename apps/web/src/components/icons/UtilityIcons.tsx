@@ -145,3 +145,42 @@ export const LedgerGlyphIcon = ({
     <circle cx="30" cy="22" r="3" fill="#38bdf8" opacity="0.8" />
   </svg>
 );
+
+export const TimeClockGlyphIcon = ({
+  className,
+  ...props
+}: SVGProps<SVGSVGElement>) => (
+  <svg
+    viewBox="0 0 48 48"
+    xmlns="http://www.w3.org/2000/svg"
+    className={className}
+    {...props}
+  >
+    <defs>
+      <linearGradient id="timeClockGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a78bfa" />
+        <stop offset="100%" stopColor="#7c3aed" />
+      </linearGradient>
+    </defs>
+    <circle
+      cx="24"
+      cy="24"
+      r="18"
+      fill="rgba(167, 139, 250, 0.08)"
+      stroke="url(#timeClockGradient)"
+      strokeWidth="1.5"
+    />
+    <path
+      {...gradientProps}
+      stroke="url(#timeClockGradient)"
+      strokeWidth="2"
+      d="M24 14v10l7 5"
+    />
+    <circle cx="24" cy="24" r="2" fill="url(#timeClockGradient)" />
+    <path
+      {...gradientProps}
+      stroke="url(#timeClockGradient)"
+      d="M24 8v2M24 38v2M8 24h2M38 24h2"
+    />
+  </svg>
+);

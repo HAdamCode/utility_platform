@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ExpensesGlyphIcon, LedgerGlyphIcon } from "../components/icons/UtilityIcons";
+import { ExpensesGlyphIcon, LedgerGlyphIcon, TimeClockGlyphIcon } from "../components/icons/UtilityIcons";
 
 export interface ModuleDefinition {
   id: string;
@@ -32,6 +32,17 @@ export const modules: ModuleDefinition[] = [
     tags: ["finance", "operations", "ledger"],
     maturity: "alpha",
     icon: <LedgerGlyphIcon />,
+    restricted: true
+  },
+  {
+    id: "stack-time",
+    name: "Stack Time",
+    description:
+      "Track hours worked on Stack Technologies projects. Log time, view reports by project or person.",
+    path: "/stack-time",
+    tags: ["time", "projects", "tracking"],
+    maturity: "alpha",
+    icon: <TimeClockGlyphIcon />,
     restricted: true
   }
 ];

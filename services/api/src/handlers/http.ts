@@ -2,6 +2,7 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from "aws-lambda
 import { TripService } from "../services/tripService.js";
 import { UserService } from "../services/userService.js";
 import { HarmonyLedgerService } from "../services/harmonyLedgerService.js";
+import { StackTimeService } from "../services/stackTimeService.js";
 import { getAuthContext } from "../auth.js";
 import {
   handleError,
@@ -15,6 +16,7 @@ import { ValidationError } from "../lib/errors.js";
 const tripService = new TripService();
 const userService = new UserService();
 const harmonyLedgerService = new HarmonyLedgerService();
+const stackTimeService = new StackTimeService();
 const ok = (body: unknown, origin: string): APIGatewayProxyResultV2 =>
   json(200, body, origin);
 const created = (body: unknown, origin: string): APIGatewayProxyResultV2 =>
@@ -144,6 +146,98 @@ export const handler = async (
       }
       await harmonyLedgerService.deleteTransfer(transferId, body, auth);
       return noContent(origin);
+    }
+
+    // Stack Time routes
+    if (path === "/stack-time/access" && method === "GET") {
+      const response = await stackTimeService.getAccessOverview(auth);
+      return ok(response, origin);
+    }
+
+    if (path === "/stack-time/access" && method === "POST") {
+      const body = parseBody(event);
+      const record = await stackTimeService.addAccess(body, auth);
+      return created(record, origin);
+    }
+
+    const stackTimeAccessMatch = path.match(/^\/stack-time\/access\/([^/]+)$/);
+    if (stackTimeAccessMatch && method === "DELETE") {
+      await stackTimeService.removeAccess(stackTimeAccessMatch[1], auth);
+      return noContent(origin);
+    }
+
+    if (path === "/stack-time/projects" && method === "GET") {
+      const projects = await stackTimeService.listProjects(auth);
+      return ok({ projects }, origin);
+    }
+
+    if (path === "/stack-time/projects" && method === "POST") {
+      const body = parseBody(event);
+      const project = await stackTimeService.createProject(body, auth);
+      return created(project, origin);
+    }
+
+    const stackTimeProjectMatch = path.match(/^\/stack-time\/projects\/([^/]+)$/);
+    if (stackTimeProjectMatch && method === "PATCH") {
+      const projectId = decodeURIComponent(stackTimeProjectMatch[1]);
+      const body = parseBody(event);
+      const project = await stackTimeService.updateProject(projectId, body, auth);
+      return ok(project, origin);
+    }
+
+    if (path === "/stack-time/entries" && method === "GET") {
+      const query = event.queryStringParameters ?? {};
+      const response = await stackTimeService.listEntries(auth, {
+        startDate: query.startDate,
+        endDate: query.endDate,
+        userId: query.userId
+      });
+      return ok(response, origin);
+    }
+
+    if (path === "/stack-time/entries" && method === "POST") {
+      const body = parseBody(event);
+      const entry = await stackTimeService.createEntry(body, auth);
+      return created(entry, origin);
+    }
+
+    const stackTimeEntryMatch = path.match(/^\/stack-time\/entries\/([^/]+)$/);
+    if (stackTimeEntryMatch && method === "PATCH") {
+      const entryId = decodeURIComponent(stackTimeEntryMatch[1]);
+      const body = parseBody(event);
+      if (!body) {
+        return handleError(new ValidationError("Request body required"), origin);
+      }
+      const entry = await stackTimeService.updateEntry(entryId, body, auth);
+      return ok(entry, origin);
+    }
+
+    if (stackTimeEntryMatch && method === "DELETE") {
+      const entryId = decodeURIComponent(stackTimeEntryMatch[1]);
+      const body = parseBody(event);
+      if (!body) {
+        return handleError(new ValidationError("Request body required"), origin);
+      }
+      await stackTimeService.deleteEntry(entryId, body, auth);
+      return noContent(origin);
+    }
+
+    if (path === "/stack-time/reports/by-project" && method === "GET") {
+      const query = event.queryStringParameters ?? {};
+      const report = await stackTimeService.getReportByProject(auth, {
+        startDate: query.startDate,
+        endDate: query.endDate
+      });
+      return ok({ report }, origin);
+    }
+
+    if (path === "/stack-time/reports/by-person" && method === "GET") {
+      const query = event.queryStringParameters ?? {};
+      const report = await stackTimeService.getReportByPerson(auth, {
+        startDate: query.startDate,
+        endDate: query.endDate
+      });
+      return ok({ report }, origin);
     }
 
     if (method === "GET" && path === "/trips") {
