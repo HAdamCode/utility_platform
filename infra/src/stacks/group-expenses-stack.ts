@@ -1,5 +1,20 @@
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+
+// Get the project root directory (works in both ESM and bundled CJS)
+const getProjectRoot = () => {
+  // When running from infra directory, process.cwd() gives us the infra dir
+  // We need to go up one level to get the project root
+  const cwd = process.cwd();
+  if (cwd.endsWith("/infra")) {
+    return path.dirname(cwd);
+  }
+  return cwd;
+};
+
+// Get the infra/src/stacks directory for relative path calculations
+const getStackDir = () => {
+  return path.join(getProjectRoot(), "infra/src/stacks");
+};
 import {
   Duration,
   RemovalPolicy,
@@ -45,8 +60,7 @@ export class GroupExpensesStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
+    const stackDir = getStackDir();
 
     const table = new Table(this, "ExpensesTable", {
       partitionKey: { name: "PK", type: AttributeType.STRING },
@@ -168,7 +182,7 @@ export class GroupExpensesStack extends Stack {
 
     const httpLambda = new NodejsFunction(this, "HttpHandler", {
       ...sharedFunctionProps,
-      entry: path.join(__dirname, "../../../services/api/src/handlers/http.ts"),
+      entry: path.join(stackDir, "../../../services/api/src/handlers/http.ts"),
       logRetention: RetentionDays.ONE_WEEK,
       environment: {
         ...sharedEnvironment,
@@ -182,7 +196,7 @@ export class GroupExpensesStack extends Stack {
     const textractLambda = new NodejsFunction(this, "TextractProcessor", {
       ...sharedFunctionProps,
       entry: path.join(
-        __dirname,
+        stackDir,
         "../../../services/api/src/handlers/textractProcessor.ts"
       ),
       logRetention: RetentionDays.ONE_WEEK,
@@ -202,7 +216,7 @@ export class GroupExpensesStack extends Stack {
       {
         ...sharedFunctionProps,
         entry: path.join(
-          __dirname,
+          stackDir,
           "../../../services/api/src/handlers/postConfirmation.ts"
         ),
         logRetention: RetentionDays.ONE_WEEK,

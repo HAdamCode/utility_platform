@@ -48,7 +48,8 @@ const createEntrySchema = z.object({
 });
 
 const updateEntrySchema = z.object({
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD"),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD"), // Original date for lookup
+  newDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD").optional(), // New date if changing
   projectId: z.string().min(1).optional(),
   hours: z.number().positive().max(24).optional(),
   description: z.string().max(500).optional()
@@ -475,7 +476,7 @@ export class StackTimeService {
       throw new ValidationError(parsed.error.message);
     }
 
-    const { date, ...updates } = parsed.data;
+    const { date, newDate, ...updates } = parsed.data;
 
     // Find the entry - need to search the user's entries
     // First check if it's the current user's entry
@@ -514,10 +515,29 @@ export class StackTimeService {
       projectName = project.name;
     }
 
+    const now = isoNow();
+    const finalDate = newDate ?? date;
+
+    // If date is changing, we need to delete and recreate (date is part of SK)
+    if (newDate && newDate !== date) {
+      const updatedEntry: StackTimeEntry = {
+        ...entry,
+        projectId: updates.projectId ?? entry.projectId,
+        projectName,
+        date: newDate,
+        hours: updates.hours ?? entry.hours,
+        description: updates.description ?? entry.description,
+        updatedAt: now
+      };
+      await this.store.moveEntry(entryUserId, date, entryId, updatedEntry);
+      return updatedEntry;
+    }
+
+    // Otherwise, just update in place
     await this.store.updateEntry(entryUserId, date, entryId, {
       ...updates,
       projectName,
-      updatedAt: isoNow()
+      updatedAt: now
     });
 
     return {
@@ -526,7 +546,7 @@ export class StackTimeService {
       projectName,
       hours: updates.hours ?? entry.hours,
       description: updates.description ?? entry.description,
-      updatedAt: isoNow()
+      updatedAt: now
     };
   }
 

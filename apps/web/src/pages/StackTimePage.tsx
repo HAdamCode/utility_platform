@@ -127,9 +127,10 @@ const StackTimePage = () => {
   });
 
   const updateEntryMutation = useMutation({
-    mutationFn: (payload: { entryId: string; date: string; projectId?: string; hours?: number; description?: string }) =>
+    mutationFn: (payload: { entryId: string; originalDate: string; newDate?: string; projectId?: string; hours?: number; description?: string }) =>
       api.patch<StackTimeEntry>(`/stack-time/entries/${payload.entryId}`, {
-        date: payload.date,
+        date: payload.originalDate,
+        newDate: payload.newDate,
         projectId: payload.projectId,
         hours: payload.hours,
         description: payload.description
@@ -253,9 +254,15 @@ const StackTimePage = () => {
       return;
     }
 
+    if (!entryForm.date) {
+      setEntryError("Please select a date");
+      return;
+    }
+
     updateEntryMutation.mutate({
       entryId: editingEntry.entryId,
-      date: editingEntry.date,
+      originalDate: editingEntry.date,
+      newDate: entryForm.date !== editingEntry.date ? entryForm.date : undefined,
       projectId: entryForm.projectId || undefined,
       hours,
       description: entryForm.description || undefined
@@ -370,7 +377,6 @@ const StackTimePage = () => {
                     value={entryForm.date}
                     onChange={(e) => setEntryForm((f) => ({ ...f, date: e.target.value }))}
                     required
-                    disabled={!!editingEntry}
                   />
                 </div>
                 <div className="input-group">

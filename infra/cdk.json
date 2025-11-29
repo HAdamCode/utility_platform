@@ -1,5 +1,5 @@
 {
-  "app": "npx ts-node --esm --project tsconfig.json bin/group-expenses.ts",
+  "app": "npx esbuild bin/group-expenses.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/app.cjs --packages=external && node --experimental-require-module dist/app.cjs",
   "context": {
     "@aws-cdk/core:newStyleStackSynthesis": true,
     "@aws-cdk/aws-lambda:recognizeVersionProps": true,

@@ -515,4 +515,16 @@ export class StackTimeStore {
       })
     );
   }
+
+  async moveEntry(
+    userId: string,
+    oldDate: string,
+    entryId: string,
+    newEntry: StackTimeEntry
+  ): Promise<void> {
+    // Delete old entry and create new one with updated date
+    // This is necessary because date is part of the sort key
+    await this.deleteEntry(userId, oldDate, entryId);
+    await this.createEntry(newEntry);
+  }
 }
