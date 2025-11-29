@@ -240,6 +240,15 @@ export const handler = async (
       return ok({ report }, origin);
     }
 
+    if (path === "/stack-time/reports/timeline" && method === "GET") {
+      const query = event.queryStringParameters ?? {};
+      const stats = await stackTimeService.getTimelineStats(auth, {
+        startDate: query.startDate,
+        endDate: query.endDate
+      });
+      return ok(stats, origin);
+    }
+
     if (method === "GET" && path === "/trips") {
       const trips = await tripService.listTrips(auth);
       return ok({ trips }, origin);

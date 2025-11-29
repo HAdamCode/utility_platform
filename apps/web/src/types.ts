@@ -299,3 +299,34 @@ export interface StackTimeReportByPerson {
   entryCount: number;
   byProject: StackTimeReportByProject[];
 }
+
+export interface WeeklyBreakdown {
+  weekStart: string;
+  weekEnd: string;
+  hours: number;
+  entryCount: number;
+}
+
+export interface MemberTimelineStats {
+  userId: string;
+  displayName: string;
+  totalHours: number;
+  entryCount: number;
+  avgHoursPerEntry: number;
+  avgHoursPerWeek: number;
+  activeDays: number;
+  firstEntryDate: string | null;
+  lastEntryDate: string | null;
+  weeklyBreakdown: WeeklyBreakdown[];
+  byProject: StackTimeReportByProject[];
+}
+
+export interface TimelineStatsResponse {
+  startDate: string;
+  endDate: string;
+  totalHours: number;
+  totalEntries: number;
+  activeMembers: number;
+  weeksInPeriod: number;
+  members: MemberTimelineStats[];
+}

@@ -9,10 +9,11 @@ import type {
   StackTimeEntry,
   StackTimeProject,
   StackTimeReportByPerson,
-  StackTimeReportByProject
+  StackTimeReportByProject,
+  TimelineStatsResponse
 } from "../types";
 
-type TabId = "log" | "summary" | "reports" | "projects" | "members";
+type TabId = "log" | "summary" | "reports" | "timeline" | "projects" | "members";
 
 interface EntryFormState {
   userId: string;
@@ -42,6 +43,20 @@ const formatDate = (value: string) =>
 const formatHours = (hours: number) =>
   hours === 1 ? "1 hour" : `${hours.toFixed(1)} hours`;
 
+const formatShortDate = (dateStr: string) => {
+  const date = new Date(dateStr + "T12:00:00");
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+const getDefaultDateRange = () => {
+  const end = new Date();
+  const start = new Date(end.getTime() - 12 * 7 * 24 * 60 * 60 * 1000);
+  return {
+    startDate: start.toISOString().split("T")[0],
+    endDate: end.toISOString().split("T")[0]
+  };
+};
+
 const StackTimePage = () => {
   const queryClient = useQueryClient();
   const { data: accessData, isLoading: accessLoading } = useStackTimeAccess();
@@ -54,6 +69,8 @@ const StackTimePage = () => {
   const [selectedUserId, setSelectedUserId] = useState<string>("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [editingEntry, setEditingEntry] = useState<StackTimeEntry | null>(null);
+  const [dateRange, setDateRange] = useState(getDefaultDateRange);
+  const [expandedMember, setExpandedMember] = useState<string | null>(null);
 
   const isUserAdmin = accessData?.isAdmin ?? false;
 
@@ -80,6 +97,15 @@ const StackTimePage = () => {
     queryKey: ["stack-time", "reports", "by-person"],
     queryFn: () => api.get<{ report: StackTimeReportByPerson[] }>("/stack-time/reports/by-person"),
     enabled: isUserAdmin
+  });
+
+  const timelineQuery = useQuery({
+    queryKey: ["stack-time", "reports", "timeline", dateRange.startDate, dateRange.endDate],
+    queryFn: () =>
+      api.get<TimelineStatsResponse>(
+        `/stack-time/reports/timeline?startDate=${dateRange.startDate}&endDate=${dateRange.endDate}`
+      ),
+    enabled: isUserAdmin && activeTab === "timeline"
   });
 
   // Mutations
@@ -273,6 +299,7 @@ const StackTimePage = () => {
     { id: "log", label: "Log Time" },
     { id: "summary", label: "My Summary" },
     { id: "reports", label: "Team Reports", adminOnly: true },
+    { id: "timeline", label: "Performance", adminOnly: true },
     { id: "projects", label: "Projects", adminOnly: true },
     { id: "members", label: "Members", adminOnly: true }
   ];
@@ -532,6 +559,278 @@ const StackTimePage = () => {
             </div>
           )}
         </section>
+      )}
+
+      {activeTab === "timeline" && isUserAdmin && (
+        <div>
+          {/* Date range filter */}
+          <section className="card" style={{ marginBottom: "1rem" }}>
+            <div className="section-title">
+              <h2>Performance Timeline</h2>
+            </div>
+            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div className="input-group" style={{ flex: "0 0 auto" }}>
+                <label>Start Date</label>
+                <input
+                  type="date"
+                  value={dateRange.startDate}
+                  onChange={(e) => setDateRange((prev) => ({ ...prev, startDate: e.target.value }))}
+                />
+              </div>
+              <div className="input-group" style={{ flex: "0 0 auto" }}>
+                <label>End Date</label>
+                <input
+                  type="date"
+                  value={dateRange.endDate}
+                  onChange={(e) => setDateRange((prev) => ({ ...prev, endDate: e.target.value }))}
+                />
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    const end = new Date();
+                    const start = new Date(end.getTime() - 4 * 7 * 24 * 60 * 60 * 1000);
+                    setDateRange({
+                      startDate: start.toISOString().split("T")[0],
+                      endDate: end.toISOString().split("T")[0]
+                    });
+                  }}
+                >
+                  Last 4 weeks
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    const end = new Date();
+                    const start = new Date(end.getTime() - 12 * 7 * 24 * 60 * 60 * 1000);
+                    setDateRange({
+                      startDate: start.toISOString().split("T")[0],
+                      endDate: end.toISOString().split("T")[0]
+                    });
+                  }}
+                >
+                  Last 12 weeks
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    const end = new Date();
+                    const start = new Date(end.getFullYear(), 0, 1);
+                    setDateRange({
+                      startDate: start.toISOString().split("T")[0],
+                      endDate: end.toISOString().split("T")[0]
+                    });
+                  }}
+                >
+                  This Year
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {timelineQuery.isLoading && <p className="muted">Loading timeline data...</p>}
+          {timelineQuery.data && (
+            <>
+              {/* Summary stats */}
+              <section className="card" style={{ marginBottom: "1rem" }}>
+                <div className="section-title">
+                  <h2>Summary</h2>
+                  <span className="muted">
+                    {formatDate(timelineQuery.data.startDate)} — {formatDate(timelineQuery.data.endDate)}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: "2rem", flexWrap: "wrap" }}>
+                  <div>
+                    <p className="muted" style={{ margin: "0 0 0.25rem", fontSize: "0.85rem" }}>
+                      Total Hours
+                    </p>
+                    <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>
+                      {timelineQuery.data.totalHours.toFixed(1)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="muted" style={{ margin: "0 0 0.25rem", fontSize: "0.85rem" }}>
+                      Total Entries
+                    </p>
+                    <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>
+                      {timelineQuery.data.totalEntries}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="muted" style={{ margin: "0 0 0.25rem", fontSize: "0.85rem" }}>
+                      Active Members
+                    </p>
+                    <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>
+                      {timelineQuery.data.activeMembers}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="muted" style={{ margin: "0 0 0.25rem", fontSize: "0.85rem" }}>
+                      Weeks
+                    </p>
+                    <p style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>
+                      {timelineQuery.data.weeksInPeriod}
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              {/* Per-member breakdown */}
+              {timelineQuery.data.members.length === 0 && (
+                <p className="muted">No time logged in this period.</p>
+              )}
+              <div className="list">
+                {timelineQuery.data.members.map((member) => (
+                  <section
+                    key={member.userId}
+                    className="card"
+                    style={{ padding: "1rem 1.25rem", cursor: "pointer" }}
+                    onClick={() =>
+                      setExpandedMember(expandedMember === member.userId ? null : member.userId)
+                    }
+                  >
+                    <div className="section-title" style={{ marginBottom: "0.75rem" }}>
+                      <h3 style={{ margin: 0 }}>{member.displayName}</h3>
+                      <span className="pill">{formatHours(member.totalHours)}</span>
+                    </div>
+
+                    {/* Key metrics */}
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                        gap: "1rem",
+                        marginBottom: "1rem"
+                      }}
+                    >
+                      <div>
+                        <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>
+                          Avg Hours/Entry
+                        </p>
+                        <p style={{ margin: 0, fontWeight: 600 }}>{member.avgHoursPerEntry}</p>
+                      </div>
+                      <div>
+                        <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>
+                          Avg Hours/Active Week
+                        </p>
+                        <p style={{ margin: 0, fontWeight: 600 }}>{member.avgHoursPerWeek}</p>
+                      </div>
+                      <div>
+                        <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>
+                          Active Days
+                        </p>
+                        <p style={{ margin: 0, fontWeight: 600 }}>{member.activeDays}</p>
+                      </div>
+                      <div>
+                        <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>
+                          Entries
+                        </p>
+                        <p style={{ margin: 0, fontWeight: 600 }}>{member.entryCount}</p>
+                      </div>
+                    </div>
+
+                    {/* Weekly breakdown - simple bar visualization */}
+                    <div style={{ marginBottom: "0.75rem" }}>
+                      <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.75rem" }}>
+                        Weekly Hours
+                      </p>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "2px",
+                          alignItems: "flex-end",
+                          height: "40px"
+                        }}
+                      >
+                        {member.weeklyBreakdown.map((week, idx) => {
+                          const maxHours = Math.max(...member.weeklyBreakdown.map((w) => w.hours), 1);
+                          const height = (week.hours / maxHours) * 100;
+                          return (
+                            <div
+                              key={idx}
+                              title={`${formatShortDate(week.weekStart)}: ${week.hours.toFixed(1)} hrs`}
+                              style={{
+                                flex: 1,
+                                height: `${Math.max(height, 2)}%`,
+                                background: week.hours > 0 ? "var(--accent, #6366f1)" : "var(--border, #333)",
+                                borderRadius: "2px",
+                                minWidth: "4px"
+                              }}
+                            />
+                          );
+                        })}
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          marginTop: "0.25rem"
+                        }}
+                      >
+                        <span className="muted" style={{ fontSize: "0.65rem" }}>
+                          {formatShortDate(member.weeklyBreakdown[0]?.weekStart ?? "")}
+                        </span>
+                        <span className="muted" style={{ fontSize: "0.65rem" }}>
+                          {formatShortDate(
+                            member.weeklyBreakdown[member.weeklyBreakdown.length - 1]?.weekStart ?? ""
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Expanded details */}
+                    {expandedMember === member.userId && (
+                      <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border, #333)", paddingTop: "1rem" }}>
+                        <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.75rem" }}>
+                          First Entry: {member.firstEntryDate ? formatDate(member.firstEntryDate) : "—"}
+                          {" | "}Last Entry: {member.lastEntryDate ? formatDate(member.lastEntryDate) : "—"}
+                        </p>
+                        <p className="muted" style={{ margin: "0 0 0.5rem", fontSize: "0.85rem", fontWeight: 600 }}>
+                          Hours by Project
+                        </p>
+                        <div className="table-wrapper">
+                          <table>
+                            <thead>
+                              <tr>
+                                <th>Project</th>
+                                <th>Hours</th>
+                                <th>Entries</th>
+                                <th>% of Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {member.byProject.map((proj) => (
+                                <tr key={proj.projectId}>
+                                  <td>{proj.projectName}</td>
+                                  <td>{proj.totalHours.toFixed(1)}</td>
+                                  <td>{proj.entryCount}</td>
+                                  <td>
+                                    {member.totalHours > 0
+                                      ? ((proj.totalHours / member.totalHours) * 100).toFixed(0)
+                                      : 0}
+                                    %
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    <p className="muted" style={{ margin: "0.5rem 0 0", fontSize: "0.75rem", textAlign: "center" }}>
+                      {expandedMember === member.userId ? "Click to collapse" : "Click to expand"}
+                    </p>
+                  </section>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {activeTab === "projects" && isUserAdmin && (

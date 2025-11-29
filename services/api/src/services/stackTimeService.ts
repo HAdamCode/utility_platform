@@ -85,6 +85,37 @@ export interface StackTimeReportByPerson {
   byProject: StackTimeReportByProject[];
 }
 
+export interface WeeklyBreakdown {
+  weekStart: string; // YYYY-MM-DD (Monday)
+  weekEnd: string; // YYYY-MM-DD (Sunday)
+  hours: number;
+  entryCount: number;
+}
+
+export interface MemberTimelineStats {
+  userId: string;
+  displayName: string;
+  totalHours: number;
+  entryCount: number;
+  avgHoursPerEntry: number;
+  avgHoursPerWeek: number;
+  activeDays: number;
+  firstEntryDate: string | null;
+  lastEntryDate: string | null;
+  weeklyBreakdown: WeeklyBreakdown[];
+  byProject: StackTimeReportByProject[];
+}
+
+export interface TimelineStatsResponse {
+  startDate: string;
+  endDate: string;
+  totalHours: number;
+  totalEntries: number;
+  activeMembers: number;
+  weeksInPeriod: number;
+  members: MemberTimelineStats[];
+}
+
 const isoNow = () => new Date().toISOString();
 
 const displayNameFromProfile = (profile: UserProfile): string =>
@@ -620,5 +651,153 @@ export class StackTimeService {
     }
 
     return result;
+  }
+
+  async getTimelineStats(
+    auth: AuthContext,
+    query: { startDate?: string; endDate?: string }
+  ): Promise<TimelineStatsResponse> {
+    await this.requireAdmin(auth);
+    await this.ensureDefaultProjects();
+
+    // Default to last 12 weeks if no dates provided
+    const endDate = query.endDate ?? new Date().toISOString().split("T")[0];
+    const startDate =
+      query.startDate ??
+      new Date(Date.now() - 12 * 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+    const entries = await this.store.listAllEntries({ startDate, endDate });
+
+    // Helper to get Monday of a week
+    const getWeekStart = (dateStr: string): string => {
+      const date = new Date(dateStr + "T12:00:00");
+      const day = date.getDay();
+      const diff = day === 0 ? -6 : 1 - day; // Monday is 1, Sunday is 0
+      date.setDate(date.getDate() + diff);
+      return date.toISOString().split("T")[0];
+    };
+
+    // Helper to get Sunday of a week
+    const getWeekEnd = (weekStart: string): string => {
+      const date = new Date(weekStart + "T12:00:00");
+      date.setDate(date.getDate() + 6);
+      return date.toISOString().split("T")[0];
+    };
+
+    // Generate all weeks in the period
+    const allWeeks: string[] = [];
+    let currentWeekStart = getWeekStart(startDate);
+    const periodEnd = getWeekStart(endDate);
+    while (currentWeekStart <= periodEnd) {
+      allWeeks.push(currentWeekStart);
+      const nextWeek = new Date(currentWeekStart + "T12:00:00");
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      currentWeekStart = nextWeek.toISOString().split("T")[0];
+    }
+
+    // Build member stats
+    const memberMap = new Map<
+      string,
+      {
+        userId: string;
+        displayName: string;
+        entries: typeof entries;
+        weeklyHours: Map<string, { hours: number; entryCount: number }>;
+        projectHours: Map<string, { projectName: string; hours: number; entryCount: number }>;
+        uniqueDays: Set<string>;
+      }
+    >();
+
+    for (const entry of entries) {
+      let member = memberMap.get(entry.userId);
+      if (!member) {
+        member = {
+          userId: entry.userId,
+          displayName: entry.userDisplayName ?? entry.userId,
+          entries: [],
+          weeklyHours: new Map(),
+          projectHours: new Map(),
+          uniqueDays: new Set()
+        };
+        memberMap.set(entry.userId, member);
+      }
+
+      member.entries.push(entry);
+      member.uniqueDays.add(entry.date);
+
+      // Weekly breakdown
+      const weekStart = getWeekStart(entry.date);
+      const weekData = member.weeklyHours.get(weekStart) ?? { hours: 0, entryCount: 0 };
+      weekData.hours += entry.hours;
+      weekData.entryCount += 1;
+      member.weeklyHours.set(weekStart, weekData);
+
+      // Project breakdown
+      const projectData = member.projectHours.get(entry.projectId) ?? {
+        projectName: entry.projectName ?? entry.projectId,
+        hours: 0,
+        entryCount: 0
+      };
+      projectData.hours += entry.hours;
+      projectData.entryCount += 1;
+      member.projectHours.set(entry.projectId, projectData);
+    }
+
+    // Build response
+    const members: MemberTimelineStats[] = [];
+
+    for (const [userId, data] of memberMap) {
+      const sortedEntries = data.entries.sort((a, b) => a.date.localeCompare(b.date));
+      const totalHours = data.entries.reduce((sum, e) => sum + e.hours, 0);
+      const entryCount = data.entries.length;
+
+      // Build weekly breakdown with zeros for inactive weeks
+      const weeklyBreakdown: WeeklyBreakdown[] = allWeeks.map((weekStart) => {
+        const weekData = data.weeklyHours.get(weekStart);
+        return {
+          weekStart,
+          weekEnd: getWeekEnd(weekStart),
+          hours: weekData?.hours ?? 0,
+          entryCount: weekData?.entryCount ?? 0
+        };
+      });
+
+      // Count active weeks (weeks with > 0 hours)
+      const activeWeeks = weeklyBreakdown.filter((w) => w.hours > 0).length;
+
+      members.push({
+        userId,
+        displayName: data.displayName,
+        totalHours,
+        entryCount,
+        avgHoursPerEntry: entryCount > 0 ? Math.round((totalHours / entryCount) * 100) / 100 : 0,
+        avgHoursPerWeek: activeWeeks > 0 ? Math.round((totalHours / activeWeeks) * 100) / 100 : 0,
+        activeDays: data.uniqueDays.size,
+        firstEntryDate: sortedEntries.length > 0 ? sortedEntries[0].date : null,
+        lastEntryDate: sortedEntries.length > 0 ? sortedEntries[sortedEntries.length - 1].date : null,
+        weeklyBreakdown,
+        byProject: Array.from(data.projectHours.entries())
+          .map(([projectId, proj]) => ({
+            projectId,
+            projectName: proj.projectName,
+            totalHours: proj.hours,
+            entryCount: proj.entryCount
+          }))
+          .sort((a, b) => b.totalHours - a.totalHours)
+      });
+    }
+
+    // Sort members by total hours
+    members.sort((a, b) => b.totalHours - a.totalHours);
+
+    return {
+      startDate,
+      endDate,
+      totalHours: entries.reduce((sum, e) => sum + e.hours, 0),
+      totalEntries: entries.length,
+      activeMembers: members.length,
+      weeksInPeriod: allWeeks.length,
+      members
+    };
   }
 }
