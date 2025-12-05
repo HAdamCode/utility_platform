@@ -249,6 +249,15 @@ export const handler = async (
       return ok(stats, origin);
     }
 
+    if (path === "/stack-time/entries/team" && method === "GET") {
+      const query = event.queryStringParameters ?? {};
+      const response = await stackTimeService.listTeamEntries(auth, {
+        startDate: query.startDate,
+        endDate: query.endDate
+      });
+      return ok(response, origin);
+    }
+
     if (method === "GET" && path === "/trips") {
       const trips = await tripService.listTrips(auth);
       return ok({ trips }, origin);

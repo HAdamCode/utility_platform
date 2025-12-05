@@ -398,6 +398,35 @@ export class StackTimeService {
     return { entries, totalHours };
   }
 
+  async listTeamEntries(
+    auth: AuthContext,
+    query: { startDate?: string; endDate?: string }
+  ): Promise<{ entries: StackTimeEntry[]; totalHours: number }> {
+    const { access } = await this.requireAccess(auth);
+
+    if (!access.isAdmin) {
+      throw new ForbiddenError("Only admins can view team entries.");
+    }
+
+    await this.ensureDefaultProjects();
+
+    const entries = await this.store.listAllEntries({
+      startDate: query.startDate,
+      endDate: query.endDate
+    });
+
+    // Sort by date descending, then by createdAt descending
+    entries.sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+
+    const totalHours = entries.reduce((sum, e) => sum + e.hours, 0);
+
+    return { entries, totalHours };
+  }
+
   async createEntry(body: unknown, auth: AuthContext): Promise<StackTimeEntry> {
     const { profile, access } = await this.requireAccess(auth);
     await this.ensureDefaultProjects();

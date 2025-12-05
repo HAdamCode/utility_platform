@@ -99,6 +99,12 @@ const StackTimePage = () => {
     enabled: isUserAdmin
   });
 
+  const teamEntriesQuery = useQuery({
+    queryKey: ["stack-time", "entries", "team"],
+    queryFn: () => api.get<StackTimeEntriesResponse>("/stack-time/entries/team"),
+    enabled: isUserAdmin && activeTab === "reports"
+  });
+
   const timelineQuery = useQuery({
     queryKey: ["stack-time", "reports", "timeline", dateRange.startDate, dateRange.endDate],
     queryFn: () =>
@@ -520,51 +526,92 @@ const StackTimePage = () => {
       )}
 
       {activeTab === "reports" && isUserAdmin && (
-        <section className="card">
-          <div className="section-title">
-            <h2>Team Hours by Person</h2>
-          </div>
-          {personReportQuery.isLoading && <p className="muted">Loading...</p>}
-          {personReportQuery.data && personReportQuery.data.report.length === 0 && (
-            <p className="muted">No time logged by the team yet.</p>
-          )}
-          {personReportQuery.data && personReportQuery.data.report.length > 0 && (
-            <div className="list">
-              {personReportQuery.data.report.map((person) => (
-                <div
-                  key={person.userId}
-                  className="card"
-                  style={{ padding: "1rem 1.25rem" }}
-                >
-                  <div className="section-title" style={{ marginBottom: "0.75rem" }}>
-                    <h3 style={{ margin: 0 }}>{person.displayName}</h3>
-                    <span className="muted">{formatHours(person.totalHours)} total</span>
-                  </div>
-                  <div className="table-wrapper">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Project</th>
-                          <th>Hours</th>
-                          <th>Entries</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {person.byProject.map((proj) => (
-                          <tr key={proj.projectId}>
-                            <td>{proj.projectName}</td>
-                            <td>{proj.totalHours.toFixed(1)}</td>
-                            <td>{proj.entryCount}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              ))}
+        <>
+          <section className="card" style={{ marginBottom: "1rem" }}>
+            <div className="section-title">
+              <h2>Team Hours by Person</h2>
             </div>
-          )}
-        </section>
+            {personReportQuery.isLoading && <p className="muted">Loading...</p>}
+            {personReportQuery.data && personReportQuery.data.report.length === 0 && (
+              <p className="muted">No time logged by the team yet.</p>
+            )}
+            {personReportQuery.data && personReportQuery.data.report.length > 0 && (
+              <div className="list">
+                {personReportQuery.data.report.map((person) => (
+                  <div
+                    key={person.userId}
+                    className="card"
+                    style={{ padding: "1rem 1.25rem" }}
+                  >
+                    <div className="section-title" style={{ marginBottom: "0.75rem" }}>
+                      <h3 style={{ margin: 0 }}>{person.displayName}</h3>
+                      <span className="muted">{formatHours(person.totalHours)} total</span>
+                    </div>
+                    <div className="table-wrapper">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Project</th>
+                            <th>Hours</th>
+                            <th>Entries</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {person.byProject.map((proj) => (
+                            <tr key={proj.projectId}>
+                              <td>{proj.projectName}</td>
+                              <td>{proj.totalHours.toFixed(1)}</td>
+                              <td>{proj.entryCount}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="card">
+            <div className="section-title">
+              <h2>All Team Entries</h2>
+              {teamEntriesQuery.data && teamEntriesQuery.data.entries.length > 0 && (
+                <span className="muted">{formatHours(teamEntriesQuery.data.totalHours)} total</span>
+              )}
+            </div>
+            {teamEntriesQuery.isLoading && <p className="muted">Loading...</p>}
+            {teamEntriesQuery.data && teamEntriesQuery.data.entries.length === 0 && (
+              <p className="muted">No team entries yet.</p>
+            )}
+            {teamEntriesQuery.data && teamEntriesQuery.data.entries.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Person</th>
+                      <th>Project</th>
+                      <th>Hours</th>
+                      <th>Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamEntriesQuery.data.entries.map((entry) => (
+                      <tr key={entry.entryId}>
+                        <td>{formatDate(entry.date)}</td>
+                        <td>{entry.userDisplayName ?? "-"}</td>
+                        <td>{entry.projectName ?? entry.projectId}</td>
+                        <td>{entry.hours}</td>
+                        <td>{entry.description || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
       )}
 
       {activeTab === "timeline" && isUserAdmin && (
