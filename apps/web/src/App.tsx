@@ -18,6 +18,7 @@ import { WorkspaceBadgeIcon } from "./components/icons/UtilityIcons";
 import HarmonyLedgerPage from "./pages/HarmonyLedgerPage";
 import HarmonyOverviewPage from "./pages/HarmonyOverviewPage";
 import StackTimePage from "./pages/StackTimePage";
+import ProfilePage from "./pages/ProfilePage";
 import { useHarmonyLedgerAccess } from "./modules/useHarmonyLedgerAccess";
 import { useStackTimeAccess } from "./modules/useStackTimeAccess";
 
@@ -92,16 +93,25 @@ const AppContent = ({ user, signOut }: AppContentProps) => {
                 </NavLink>
               ))}
             </nav>
-          </div>
-          <div className="header-actions">
-            <button className="secondary" onClick={() => signOut?.()}>
-              Sign Out
-            </button>
-          </div>
-        </header>
-        <Routes>
-          <Route path="/" element={<ModuleHub modules={availableModules} />} />
-          <Route path="/group-expenses" element={<GroupExpensesModule />}>
+        </div>
+        <div className="header-actions">
+          <NavLink
+            to="/profile"
+            className={({ isActive }) =>
+              isActive ? "module-link active" : "module-link"
+            }
+          >
+            Profile
+          </NavLink>
+          <button className="secondary" onClick={() => signOut?.()}>
+            Sign Out
+          </button>
+        </div>
+      </header>
+      <Routes>
+        <Route path="/" element={<ModuleHub modules={availableModules} />} />
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/group-expenses" element={<GroupExpensesModule />}>
             <Route index element={<Navigate to="trips" replace />} />
             <Route path="trips" element={<TripListPage />} />
             <Route path="trips/:tripId" element={<TripDetailPage />} />

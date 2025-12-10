@@ -72,6 +72,17 @@ export const handler = async (
       return ok({ users }, origin);
     }
 
+    if (path === "/profile" && method === "GET") {
+      const profile = await userService.getProfile(auth);
+      return ok({ profile }, origin);
+    }
+
+    if (path === "/profile" && method === "PATCH") {
+      const body = parseBody(event);
+      const profile = await userService.updateProfile(body, auth);
+      return ok({ profile }, origin);
+    }
+
     if (path === "/harmony-ledger/access" && method === "GET") {
       const response = await harmonyLedgerService.getAccessOverview(auth);
       return ok(response, origin);

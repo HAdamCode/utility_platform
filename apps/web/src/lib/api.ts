@@ -1,6 +1,6 @@
 import { fetchAuthSession } from "@aws-amplify/auth";
 import { appConfig } from "../config";
-import type { UserProfile } from "../types";
+import type { PaymentMethods, UserProfile } from "../types";
 
 class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -77,3 +77,10 @@ export const searchUsers = (query: string) =>
     "GET",
     `/users?query=${encodeURIComponent(query)}`
   );
+
+export const getProfile = () =>
+  request<{ profile: UserProfile }>("GET", "/profile");
+
+export const updateProfile = (
+  methods: Partial<Record<keyof PaymentMethods, string | null>>
+) => request<{ profile: UserProfile }>("PATCH", "/profile", { body: methods });

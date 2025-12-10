@@ -10,6 +10,24 @@ const searchSchema = z.object({
   query: z.string().min(1).max(255)
 });
 
+const paymentMethodField = z.union([z.string().trim().min(1), z.null()]).optional();
+
+const paymentMethodsSchema = z
+  .object({
+    venmo: paymentMethodField,
+    paypal: paymentMethodField,
+    zelle: paymentMethodField
+  })
+  .superRefine((value, ctx) => {
+    const hasValue = Object.values(value).some((item) => item !== undefined);
+    if (!hasValue) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "At least one payment method must be provided"
+      });
+    }
+  });
+
 export class UserService {
   async searchUsers(
     params: Record<string, string | undefined>,
@@ -26,5 +44,38 @@ export class UserService {
     }
 
     return userStore.searchUsers(parsed.data.query, 10);
+  }
+
+  async getProfile(auth: AuthContext): Promise<UserProfile> {
+    return userStore.ensureUserProfile(auth);
+  }
+
+  async updateProfile(
+    body: unknown,
+    auth: AuthContext
+  ): Promise<UserProfile> {
+    const parsed = paymentMethodsSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new ValidationError(parsed.error.message);
+    }
+
+    await userStore.ensureUserProfile(auth);
+
+    const cleaned: Partial<
+      Record<keyof NonNullable<UserProfile["paymentMethods"]>, string | null>
+    > = {};
+    (["venmo", "paypal", "zelle"] as const).forEach((key) => {
+      const value = parsed.data[key];
+      if (value === undefined) return;
+      cleaned[key] = value === null ? null : value.trim();
+    });
+
+    await userStore.updatePaymentMethods(auth.userId, cleaned);
+
+    const updated = await userStore.getUser(auth.userId);
+    if (!updated) {
+      throw new ValidationError("Profile not found");
+    }
+    return updated;
   }
 }

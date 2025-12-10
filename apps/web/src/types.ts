@@ -120,6 +120,9 @@ export interface UserProfile {
   displayName?: string;
   email?: string;
   displayNameLower?: string;
+  paymentMethods?: PaymentMethods;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface PaymentMethods {
