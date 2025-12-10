@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuthenticator } from "@aws-amplify/ui-react";
@@ -674,6 +674,7 @@ const OverviewTab = ({
   expenses
 }: OverviewTabProps) => {
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const detailRef = useRef<HTMLDivElement | null>(null);
   const currencyFormatter = useMemo(
     () =>
       new Intl.NumberFormat(undefined, {
@@ -722,6 +723,12 @@ const OverviewTab = ({
   );
 
   const selectedMemberName = selectedMemberId ? membersById[selectedMemberId] ?? selectedMemberId : null;
+
+  useEffect(() => {
+    if (selectedMemberId && detailRef.current) {
+      detailRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [selectedMemberId]);
 
   return (
     <div className="grid-two">
@@ -780,6 +787,7 @@ const OverviewTab = ({
               border: "1px solid rgba(148,163,184,0.14)",
               borderRadius: "0.85rem"
             }}
+            ref={detailRef}
           >
             <div className="section-title" style={{ marginBottom: "0.55rem" }}>
               <h3 style={{ margin: 0 }}>
