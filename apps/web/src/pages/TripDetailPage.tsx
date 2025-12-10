@@ -116,9 +116,13 @@ const TripDetailPage = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user } = useAuthenticator((context) => [context.user]);
+  const userAttributes =
+    user && "attributes" in user
+      ? (user as { attributes?: Record<string, string> }).attributes
+      : undefined;
   const loggedInUserId =
     user?.userId ??
-    (user?.attributes as Record<string, string> | undefined)?.sub ??
+    userAttributes?.sub ??
     user?.username ??
     undefined;
 
@@ -575,6 +579,7 @@ const TripDetailPage = () => {
           membersById={membersById}
           settlementSuggestions={settlementSuggestions}
           currency={trip.currency}
+          expenses={expenses}
         />
       )}
 
@@ -658,9 +663,17 @@ interface OverviewTabProps {
   membersById: Record<string, string>;
   settlementSuggestions: Array<{ from: string; to: string; amount: number }>;
   currency: string;
+  expenses: TripSummary["expenses"];
 }
 
-const OverviewTab = ({ balances, membersById, settlementSuggestions, currency }: OverviewTabProps) => {
+const OverviewTab = ({
+  balances,
+  membersById,
+  settlementSuggestions,
+  currency,
+  expenses
+}: OverviewTabProps) => {
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const currencyFormatter = useMemo(
     () =>
       new Intl.NumberFormat(undefined, {
@@ -671,6 +684,44 @@ const OverviewTab = ({ balances, membersById, settlementSuggestions, currency }:
       }),
     [currency]
   );
+
+  const expensesByMember = useMemo(() => {
+    const map: Record<string, Array<{ expense: Expense; share: number; isPayer: boolean }>> = {};
+
+    expenses.forEach((expense) => {
+      expense.allocations.forEach((allocation) => {
+        map[allocation.memberId] = map[allocation.memberId] ?? [];
+        map[allocation.memberId].push({
+          expense,
+          share: allocation.amount,
+          isPayer: expense.paidByMemberId === allocation.memberId
+        });
+      });
+
+      if (!expense.allocations.some((allocation) => allocation.memberId === expense.paidByMemberId)) {
+        map[expense.paidByMemberId] = map[expense.paidByMemberId] ?? [];
+        map[expense.paidByMemberId].push({
+          expense,
+          share: 0,
+          isPayer: true
+        });
+      }
+    });
+
+    return map;
+  }, [expenses]);
+
+  const selectedMemberExpenses = useMemo(
+    () => (selectedMemberId ? expensesByMember[selectedMemberId] ?? [] : []),
+    [expensesByMember, selectedMemberId]
+  );
+
+  const selectedMemberTotal = useMemo(
+    () => selectedMemberExpenses.reduce((sum, entry) => sum + entry.share, 0),
+    [selectedMemberExpenses]
+  );
+
+  const selectedMemberName = selectedMemberId ? membersById[selectedMemberId] ?? selectedMemberId : null;
 
   return (
     <div className="grid-two">
@@ -683,14 +734,27 @@ const OverviewTab = ({ balances, membersById, settlementSuggestions, currency }:
             <p className="muted">No balances yet.</p>
           ) : (
             balances.map((balance) => (
-              <div
+              <button
                 key={balance.memberId}
+                type="button"
+                onClick={() =>
+                  setSelectedMemberId((current) => (current === balance.memberId ? null : balance.memberId))
+                }
                 className="card"
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  padding: "0.75rem 1rem"
+                  padding: "0.75rem 1rem",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  border: selectedMemberId === balance.memberId ? "1px solid rgba(56,189,248,0.6)" : undefined,
+                  boxShadow:
+                    selectedMemberId === balance.memberId
+                      ? "0 12px 32px -18px rgba(56,189,248,0.45)"
+                      : undefined,
+                  background:
+                    selectedMemberId === balance.memberId ? "rgba(59,130,246,0.12)" : undefined
                 }}
               >
                 <span>{membersById[balance.memberId] ?? balance.memberId}</span>
@@ -701,10 +765,104 @@ const OverviewTab = ({ balances, membersById, settlementSuggestions, currency }:
                 >
                   {currencyFormatter.format(balance.balance)}
                 </strong>
-              </div>
+              </button>
             ))
           )}
         </div>
+
+        {selectedMemberId && (
+          <div
+            className="card"
+            style={{
+              marginTop: "0.85rem",
+              padding: "0.95rem 1.05rem",
+              background: "rgba(15,23,42,0.5)",
+              border: "1px solid rgba(148,163,184,0.14)",
+              borderRadius: "0.85rem"
+            }}
+          >
+            <div className="section-title" style={{ marginBottom: "0.55rem" }}>
+              <h3 style={{ margin: 0 }}>
+                Expenses for {selectedMemberName}
+              </h3>
+              <span className="muted">
+                {selectedMemberExpenses.length} items · {currencyFormatter.format(selectedMemberTotal)}
+              </span>
+            </div>
+            {selectedMemberExpenses.length === 0 ? (
+              <p className="muted" style={{ margin: 0 }}>
+                No expenses allocated to this person yet.
+              </p>
+            ) : (
+              <div className="list" style={{ gap: "0.65rem" }}>
+                {selectedMemberExpenses.map(({ expense, share, isPayer }) => (
+                  <div
+                    key={expense.expenseId}
+                    className="card"
+                    style={{
+                      padding: "0.75rem 0.85rem",
+                      background: "rgba(30,41,59,0.65)",
+                      borderRadius: "0.8rem",
+                      border: "1px solid rgba(148,163,184,0.12)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "0.35rem"
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        gap: "0.75rem",
+                        flexWrap: "wrap"
+                      }}
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                        <strong>{expense.description}</strong>
+                        <span className="muted" style={{ fontSize: "0.9rem" }}>
+                          {formatDate(expense.createdAt)} · Paid by {membersById[expense.paidByMemberId] ?? expense.paidByMemberId}
+                        </span>
+                        {expense.category && (
+                          <span
+                            className="pill"
+                            style={{ background: "rgba(236,72,153,0.14)", color: "#f9a8d4", width: "fit-content" }}
+                          >
+                            {expense.category}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-end",
+                          minWidth: "140px",
+                          gap: "0.2rem"
+                        }}
+                      >
+                        <span style={{ fontWeight: 700 }}>
+                          {share > 0 ? currencyFormatter.format(share) : "No allocation set"}
+                        </span>
+                        <span className="muted" style={{ fontSize: "0.85rem" }}>
+                          of {currencyFormatter.format(expense.total)}
+                        </span>
+                        {isPayer && (
+                          <span
+                            className="pill"
+                            style={{ background: "rgba(56,189,248,0.16)", color: "#bae6fd" }}
+                          >
+                            Paid by {membersById[expense.paidByMemberId] ?? expense.paidByMemberId}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {settlementSuggestions.length > 0 && (
@@ -738,7 +896,7 @@ interface ExpensesTabProps {
   members: TripSummary["members"];
   expenses: TripSummary["expenses"];
   currency: string;
-  onCreateExpense: (payload: CreateExpenseInput) => Promise<void>;
+  onCreateExpense: (payload: CreateExpenseInput) => Promise<unknown>;
   isCreating: boolean;
   membersById: Record<string, string>;
   onDeleteExpense: (expenseId: string) => Promise<void>;
@@ -1643,7 +1801,7 @@ interface SettlementsTabProps {
     toMemberId: string;
     amount: number;
     note?: string;
-  }) => Promise<void>;
+  }) => Promise<unknown>;
   isRecording: boolean;
   onConfirm: (settlementId: string, confirmed: boolean) => void;
   confirmPending: boolean;

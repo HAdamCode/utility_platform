@@ -9,7 +9,7 @@ interface SettlementFormProps {
     toMemberId: string;
     amount: number;
     note?: string;
-  }) => Promise<void>;
+  }) => Promise<unknown>;
   isSubmitting: boolean;
   currentUserId?: string;
   paymentMethods?: Record<string, PaymentMethods>;

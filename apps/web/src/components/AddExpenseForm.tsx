@@ -166,7 +166,7 @@ interface AddExpenseFormProps {
   members: TripMember[];
   currency: string;
   receipts: Receipt[];
-  onSubmit: (payload: CreateExpenseInput) => Promise<void>;
+  onSubmit: (payload: CreateExpenseInput) => Promise<unknown>;
   isSubmitting: boolean;
   currentUserId?: string;
 }
